@@ -669,20 +669,18 @@ class MainApp(ctk.CTk):
 
     def customer_register(self):
         # 1. Clear the current frame/window
-        # CHANGED: self.root -> self
         for widget in self.winfo_children():
             widget.destroy()
 
-        # 2. UI Setup
-        import customtkinter as ctk 
-
+        # 2. Re-create the main container
+        self.container = ctk.CTkFrame(self)
+        self.container.pack(fill="both", expand=True)
+        
         # Title
-        # CHANGED: self.root -> self
-        ctk.CTkLabel(self, text="Customer Registration", font=("Arial", 24, "bold")).pack(pady=30)
+        ctk.CTkLabel(self.container, text="Customer Registration", font=("Arial", 24, "bold")).pack(pady=30)
 
         # Form Frame
-        # CHANGED: self.root -> self
-        form_frame = ctk.CTkFrame(self)
+        form_frame = ctk.CTkFrame(self.container)
         form_frame.pack(pady=20, padx=20)
 
         # Name
@@ -698,7 +696,65 @@ class MainApp(ctk.CTk):
         # Contact
         ctk.CTkLabel(form_frame, text="Contact Number:").grid(row=2, column=0, padx=10, pady=10, sticky="e")
         entry_contact = ctk.CTkEntry(form_frame, width=250, placeholder_text="Enter phone number")
-        entry_contact.grid(row=2, column=1, padx=10, pady=10)
+        entry_contact.grid(row=2, column=1, padx=10, pady=10) 
+
+
+        def submit_form():
+            name = entry_name.get().strip()
+            email = entry_email.get().strip()
+            contact = entry_contact.get().strip()
+
+            # Basic Validation
+            if not name or not email or not contact:
+                from tkinter import messagebox
+                messagebox.showerror("Error", "All fields are required.")
+                return
+
+            if not is_valid_email(email):
+                from tkinter import messagebox
+                messagebox.showerror("Invalid Email", "Please enter a valid email address.")
+                return
+            
+            if not is_valid_phone(contact):
+                from tkinter import messagebox
+                messagebox.showerror("Invalid Number", "Please enter a valid phone number.")
+                return
+
+            # Database Insert
+            from db import get_conn
+            from models import CustomerModel
+
+            try:
+                conn = get_conn()
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO customer (full_name, email, contact_number) VALUES (?, ?, ?)",
+                    (name, email, contact)
+                )
+                customer_id = cur.lastrowid
+                conn.commit()
+                conn.close()
+
+                # Set current customer
+                self.current_customer = CustomerModel.get_customer_by_id(customer_id)
+                self.cart = []
+
+                # Go to Dashboard
+                self.show_admin_customer_dashboard()
+
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror("Database Error", f"An error occurred: {e}")
+
+        # 5. Buttons (***REFERENCE submit_form HERE***)
+        # Attach to self.container
+        btn_submit = ctk.CTkButton(self.container, text="Register & Continue", command=submit_form, fg_color="green")
+        btn_submit.pack(pady=20)
+
+        # Back Button
+        # Attach to self.container
+        btn_back = ctk.CTkButton(self.container, text="Cancel", command=self.show_admin_interface, fg_color="transparent", border_width=1)
+        btn_back.pack(pady=5)
 
         # 3. Submit Logic
         def submit_form():
