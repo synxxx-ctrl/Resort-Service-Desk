@@ -283,7 +283,6 @@ class MainApp(ctk.CTk):
         ])
         self.open_text_window("Reservations", txt or "No reservations available.")
 
-
     def show_transactions(self):
         from db import query
         rows = query("""
