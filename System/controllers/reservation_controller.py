@@ -28,7 +28,7 @@ class ReservationController:
     # ------------------------------------------------------------
     def show_make_reservation(self):
         self.cart = []
-        self.app.window.clear_container()
+        self.app.clear_container()  # <-- Updated
 
         frame = ctk.CTkFrame(self.app.container)
         frame.pack(pady=12, padx=12, expand=True, fill="both")
