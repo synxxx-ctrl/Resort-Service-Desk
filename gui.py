@@ -30,6 +30,64 @@ class MainApp(ctk.CTk):
         # Directly show admin login as a small centered frame
         self.open_admin_login()
 
+
+    def open_admin_login(self):
+        # Hide the main window
+        self.withdraw()
+
+        # --- CREATE SMALL LOGIN WINDOW ---
+        login_win = ctk.CTkToplevel(self)
+        login_win.title("Admin Login")
+        login_win.geometry("320x260")
+        login_win.resizable(False, False)
+        login_win.grab_set()   # Prevent clicking anywhere else
+
+        # Center the window
+        login_win.update_idletasks()
+        x = (login_win.winfo_screenwidth() // 2) - (320 // 2)
+        y = (login_win.winfo_screenheight() // 2) - (260 // 2)
+        login_win.geometry(f"320x260+{x}+{y}")
+
+        # Title
+        ctk.CTkLabel(login_win, text="Admin Login", font=("Helvetica", 20)).pack(pady=10)
+
+        # Username
+        ctk.CTkLabel(login_win, text="Username:").pack()
+        username_var = tk.StringVar()
+        username_entry = ctk.CTkEntry(login_win, width=200, textvariable=username_var)
+        username_entry.pack(pady=5)
+
+        # Password
+        ctk.CTkLabel(login_win, text="Password:").pack()
+        password_var = tk.StringVar()
+        password_entry = ctk.CTkEntry(login_win, width=200, show="*", textvariable=password_var)
+        password_entry.pack(pady=5)
+
+        # Login Logic
+        def attempt_login():
+            username = username_var.get().strip()
+            password = password_var.get().strip()
+
+            if not username or not password:
+                messagebox.showerror("Error", "Both fields are required.")
+                return
+
+            if AdminModel.check_login(username, password):
+                login_win.destroy()   # close login window
+                self.deiconify()      # show main window
+                self.show_admin_interface()
+            else:
+                messagebox.showerror("Login Failed", "Incorrect username or password.")
+
+        # ENTER KEY SUPPORT
+        login_win.bind("<Return>", lambda event: attempt_login())
+
+        # Proceed button
+        ctk.CTkButton(login_win, text="Proceed", command=attempt_login).pack(pady=15)
+
+        # Focus cursor on username
+        username_entry.focus()
+    
     # ------------------------- Main Menu -------------------------
     def show_main_menu(self):
         """Displays the main user-facing menu or initial screen."""
@@ -116,53 +174,56 @@ class MainApp(ctk.CTk):
 
     # ------------------------- Admin Login -------------------------
     def open_admin_login(self):
-        self.clear_container()  # Clear main container first
-        
-        # 1. Reduced size (300x250) and 2. Set single foreground color (fg_color)
-        login_frame = ctk.CTkFrame(
-            self.container, 
-            corner_radius=10, 
-            width=300,        # Reduced width
-            height=250,       # Reduced height
-            fg_color="#2b2b2b" # Uniform color (dark gray)
-        )
-        login_frame.place(relx=0.5, rely=0.5, anchor="center") # Centered, fixed size set in constructor
-        
-        # Title - Note: If using a dark fg_color, you may want to ensure the label text is light.
-        ctk.CTkLabel(login_frame, text="Resort Service Desk", font=("Helvetica", 20)).pack(pady=10)
-        
+        # Hide main window immediately
+        self.withdraw()
+
+        # --- CREATE SMALL LOGIN WINDOW ---
+        login_win = ctk.CTkToplevel(self)
+        login_win.title("Resort Service Desk")
+        login_win.geometry("320x260")
+        login_win.resizable(False, False)
+        login_win.grab_set()   # Make it modal (forces interaction here)
+
+        # --- CENTER WINDOW ---
+        login_win.update_idletasks()
+        x = (login_win.winfo_screenwidth() // 2) - (320 // 2)
+        y = (login_win.winfo_screenheight() // 2) - (260 // 2)
+        login_win.geometry(f"320x260+{x}+{y}")
+
+        # Title
+        ctk.CTkLabel(login_win, text="Admin Login", font=("Helvetica", 20)).pack(pady=10)
+
         # Username
-        ctk.CTkLabel(login_frame, text="Username:", font=("Helvetica", 14)).pack(pady=5)
+        ctk.CTkLabel(login_win, text="Username:").pack()
         username_var = tk.StringVar()
-        # Ensure entry width fits well in the smaller frame
-        ctk.CTkEntry(login_frame, textvariable=username_var, width=180).pack(pady=5) 
-        
+        ctk.CTkEntry(login_win, width=200, textvariable=username_var).pack(pady=5)
+
         # Password
-        ctk.CTkLabel(login_frame, text="Password:", font=("Helvetica", 14)).pack(pady=5)
+        ctk.CTkLabel(login_win, text="Password:").pack()
         password_var = tk.StringVar()
-        ctk.CTkEntry(login_frame, textvariable=password_var, show="*", width=180).pack(pady=5)
-        
-        # Proceed button
+        ctk.CTkEntry(login_win, width=200, show="*", textvariable=password_var).pack(pady=5)
+
+        # Login Logic
         def attempt_login():
             username = username_var.get().strip()
             password = password_var.get().strip()
+
             if username == "" or password == "":
                 messagebox.showerror("Error", "Both fields are required.")
                 return
-            # Assuming AdminModel is defined elsewhere and works correctly
-            if AdminModel.check_login(username, password): 
+            
+            if AdminModel.check_login(username, password):
                 self.is_admin_mode = True
+                login_win.destroy()    # Close login window
+                self.deiconify()       # Show main window
                 self.show_admin_interface()
             else:
                 messagebox.showerror("Login Failed", "Incorrect username or password.")
 
-        ctk.CTkButton(login_frame, text="Proceed", command=attempt_login).pack(pady=15)
+        ctk.CTkButton(login_win, text="Proceed", command=attempt_login).pack(pady=15)
 
 
     # ------------------------- Admin Interface Placeholder -------------------------
-    def show_admin_interface(self):
-        self.clear_container()
-        ctk.CTkLabel(self.container, text="Admin Interface Loaded", font=("Helvetica", 24)).pack(pady=50)
 
     def show_admin_interface(self):
         # --- FIX: START ---
@@ -199,7 +260,18 @@ class MainApp(ctk.CTk):
         ctk.CTkButton(frame, text="New Customer / Register", command=self.customer_register).pack(pady=8)
 
         # ------------------- Back Button -------------------
-        ctk.CTkButton(frame, text="Back", command=self.show_main_menu, fg_color="transparent", border_width=1).pack(pady=20)
+        ctk.CTkButton(frame, text="Back", command=self.logout_admin).pack()
+
+    def logout_admin(self):
+        # Hide main window
+        self.withdraw()
+
+        # Destroy admin UI frame if it exists
+        if hasattr(self, "admin_frame") and self.admin_frame.winfo_exists():
+            self.admin_frame.destroy()
+
+        # Return to login window
+        self.open_admin_login()
 
     def show_reservations(self):
         rows = AdminModel.get_reservations()
@@ -210,7 +282,6 @@ class MainApp(ctk.CTk):
             for r in rows_dicts
         ])
         self.open_text_window("Reservations", txt or "No reservations available.")
-
 
     def show_transactions(self):
         from db import query
@@ -1213,3 +1284,10 @@ class MainApp(ctk.CTk):
 if __name__ == '__main__':
     app = MainApp()
     app.mainloop()
+
+
+
+
+
+
+
