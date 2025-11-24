@@ -1278,7 +1278,6 @@ class MainApp(ctk.CTk):
             lbl = ctk.CTkLabel(frame, text=content, justify='left')
             lbl.pack(anchor='w')
             return w
-        self.focus_or_create_window(title, create)
 
 
 if __name__ == '__main__':
