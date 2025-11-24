@@ -20,7 +20,7 @@ class TransactionController:
             messagebox.showerror("Error", "No customer loaded.")
             return
 
-        self.app.clear_container()
+        self.app.clear_container()  # <-- Updated
         frame = ctk.CTkScrollableFrame(self.app.container)
         frame.pack(pady=12, padx=12, expand=True, fill="both")
 
@@ -71,7 +71,7 @@ class TransactionController:
             messagebox.showerror("Error", "No customer loaded.")
             return
 
-        self.app.clear_container()
+        self.app.clear_container()  
         frame = ctk.CTkScrollableFrame(self.app.container)
         frame.pack(pady=12, padx=12, expand=True, fill="both")
 
