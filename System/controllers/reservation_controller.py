@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 from datetime import datetime, date, timedelta
 from db import get_conn, query
-from models import RoomModel, ResortModel
+from models import RoomModel, ResortModel, AmenityModel
 
 try:
     from tkcalendar import DateEntry
@@ -182,7 +182,10 @@ class ReservationController:
         ctk.CTkLabel(left, text="Other Amenities / Extras:", font=("Helvetica", 14)).pack(pady=8)
         svc_list_frame = ctk.CTkScrollableFrame(left, height=240)
         svc_list_frame.pack(fill="both", expand=True, padx=6)
-        services = query("""SELECT service_id, service_name, base_price FROM service WHERE service_name NOT LIKE 'Room Fee%' AND service_name NOT LIKE 'Cottage%' AND service_name NOT LIKE 'Meal%'""", fetchall=True) or []
+        
+        # Fetch amenities with stock data
+        services = query("""SELECT service_id, service_name, base_price, stock_total FROM service 
+                            WHERE service_name NOT LIKE 'Room Fee%' AND service_name NOT LIKE 'Cottage%' AND service_name NOT LIKE 'Meal%'""", fetchall=True) or []
         self.populate_service_list(svc_list_frame, services)
 
         ctk.CTkLabel(right, text="Cart Preview", font=("Helvetica", 16)).pack(pady=8)
@@ -234,20 +237,27 @@ class ReservationController:
         ctk.CTkLabel(dialog, text="Select Meals", font=("Helvetica", 20, "bold")).pack(pady=10)
         food_frame = ctk.CTkScrollableFrame(dialog)
         food_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        meals = query("SELECT service_id, service_name, base_price, description FROM service WHERE service_name LIKE 'Meal%'", fetchall=True)
+        meals = query("SELECT service_id, service_name, base_price, description, stock_total FROM service WHERE service_name LIKE 'Meal%'", fetchall=True)
         self.populate_service_list(food_frame, meals)
         ctk.CTkButton(dialog, text="Done / Close", command=dialog.destroy).pack(pady=10)
 
     def populate_service_list(self, parent_frame, services_data):
         for svc in services_data:
-            sid, name, price = svc['service_id'], svc['service_name'], svc['base_price']
+            sid, name, price, stock = svc['service_id'], svc['service_name'], svc['base_price'], svc['stock_total']
+            
+            # Get Available Stock
+            avail = AmenityModel.get_available_stock(sid, stock)
+            
             rowf = ctk.CTkFrame(parent_frame)
             rowf.pack(fill='x', pady=4, padx=6)
-            lbl = ctk.CTkLabel(rowf, text=f"{name}\n₱{price:.2f}", justify="left")
+            
+            stock_txt = f"(Stock: {avail})" if stock < 100 else ""
+            lbl = ctk.CTkLabel(rowf, text=f"{name}\n₱{price:.2f} {stock_txt}", justify="left")
             lbl.pack(side='left', padx=5)
             qty_var = tk.StringVar(value='1')
             ctk.CTkEntry(rowf, width=40, textvariable=qty_var).pack(side='right', padx=4)
-            def add_action(s=sid, n=name, p=price, q=qty_var):
+            
+            def add_action(s=sid, n=name, p=price, q=qty_var, total_s=stock):
                 if "Extra Bed" in n:
                     if not self.room_id_var.get() or self.room_id_var.get() == "0":
                         messagebox.showerror("Action Blocked", "Select Room/Cottage first."); return
@@ -255,11 +265,20 @@ class ReservationController:
                     qty = int(str(q.get()).strip())
                     if qty <= 0: raise ValueError
                 except: messagebox.showerror("Invalid qty", "Must be positive."); return
+                
+                # Check against real-time stock
+                curr_avail = AmenityModel.get_available_stock(s, total_s)
+                if qty > curr_avail:
+                    messagebox.showerror("Stock Error", f"Not enough stock. Available: {curr_avail}"); return
+
                 for item in self.app.cart:
                     if item['service_id'] == s: item['qty'] += qty; self.update_cart_preview(); return
                 self.app.cart.append({'service_id': s, 'name': n, 'unit_price': p, 'qty': qty, 'mode': 'public'})
                 self.update_cart_preview()
-            ctk.CTkButton(rowf, text='Add', width=50, command=add_action).pack(side='right', padx=4)
+            
+            state = 'normal' if avail > 0 else 'disabled'
+            btn_text = 'Add' if avail > 0 else 'Out'
+            ctk.CTkButton(rowf, text=btn_text, width=50, command=add_action, state=state).pack(side='right', padx=4)
 
     def update_cart_preview(self): 
         if not self.cart_items_container or not self.cart_items_container.winfo_exists(): return
@@ -269,7 +288,6 @@ class ReservationController:
         for idx, item in enumerate(self.app.cart, start=1):
             row = ctk.CTkFrame(self.cart_items_container)
             row.pack(fill='x', pady=4, padx=6)
-            # Apply duration pricing to ALL items
             line_price = item['unit_price'] * item['qty'] * nights
             desc = f"{item['name']} x{item['qty']} ({nights} nights)" if nights > 1 else f"{item['name']} x{item['qty']}"
             ctk.CTkLabel(row, text=desc).pack(side='left')
