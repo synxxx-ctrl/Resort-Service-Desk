@@ -3,7 +3,7 @@ import os
 
 # --- IMPORTANT: DELETE OLD DB FILE BEFORE RUNNING THIS TO RESET DATA ---
 if os.path.exists('resort.db'):
-    print('resort.db already exists - skipping creation. Delete the file to recreate with new rooms and pricing.')
+    print('resort.db already exists - skipping creation. Delete the file to recreate with new RESTAURANT MENU.')
 else:
     conn = get_conn()
     cur = conn.cursor()
@@ -112,7 +112,7 @@ else:
     # 2. Seed Admin
     cur.execute('INSERT INTO admin (username, password) VALUES (?, ?)', ('admin', 'admin'))
 
-    # 3. Seed Services with SPECIFIC ROOM PRICING
+    # 3. Seed Services (UPDATED WITH RESTAURANT CHOICES)
     services = [
         # Accommodation Fees
         ('Room Fee - Single (1 Pax)', 'Standard single room per night', 1500.0),
@@ -121,9 +121,15 @@ else:
         ('Room Fee - Suite (6 Pax)', 'Luxury suite per night', 7000.0),
         ('Cottage Rental (10 Pax)', 'Large group cottage rental', 10000.0),
         
+        # --- NEW RESTAURANT MENU ---
+        ('Meal: Solo (1 Pax)', 'Set meal for 1 person', 350.0),
+        ('Meal: Couple (2 Pax)', 'Set meal for 2 people', 600.0),
+        ('Meal: Family (4-6 Pax)', 'Bundle for 4-6 people', 1500.0),
+        ('Meal: Feast (6-10 Pax)', 'Bundle for 6-10 people', 2800.0),
+        # ---------------------------
+
         # Amenities / Extras
         ('Pool Access', 'Pool day pass per pax', 250.0),
-        ('Restaurant - Set Meal', 'Set meal per pax', 350.0),
         ('Spa Session', '60-min spa per pax', 800.0),
         ('Banana Boat', 'Per ride per group', 1500.0),
         ('Jetski', 'Per 15-min ride', 2000.0),
@@ -171,4 +177,4 @@ else:
 
     conn.commit()
     conn.close()
-    print('resort.db created with specific Room Pricing and 100 Pax Capacity.')
+    print('resort.db created with expanded Restaurant Menu.')
