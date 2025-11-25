@@ -1,120 +1,40 @@
 from db import execute, get_conn
 import os
 
-# --- IMPORTANT: DELETE OLD DB FILE BEFORE RUNNING THIS TO RESET DATA ---
 if os.path.exists('resort.db'):
-    print('resort.db already exists - skipping creation. Delete the file to recreate with new schema.')
+    print('resort.db already exists - skipping creation. Delete the file to recreate with Karaoke and new pricing logic.')
 else:
     conn = get_conn()
     cur = conn.cursor()
 
-    # 1. Create Tables
-    cur.execute('''CREATE TABLE admin (
-        admin_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        password TEXT
-    )''')
-
-    cur.execute('''CREATE TABLE customer (
-        customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        full_name TEXT,
-        email TEXT,
-        contact_number TEXT
-    )''')
-
-    cur.execute('''CREATE TABLE resort_info (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        max_capacity INTEGER
-    )''')
-
-    cur.execute('''CREATE TABLE room (
-        room_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        room_number TEXT UNIQUE,
-        room_capacity INTEGER,
-        status TEXT,
-        type TEXT 
-    )''')
-
-    # MODIFIED: Added guest breakdown columns
-    cur.execute('''CREATE TABLE reservation (
-        reservation_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id INTEGER,
-        check_in_date TEXT,
-        check_out_date TEXT,
-        check_out_date_actual TEXT, 
-        num_guests INTEGER,
-        count_adults INTEGER DEFAULT 0,
-        count_kids INTEGER DEFAULT 0,
-        count_pwd INTEGER DEFAULT 0,
-        count_seniors INTEGER DEFAULT 0,
-        status TEXT,
-        notes TEXT,
-        created_at TEXT,
-        is_cancelled INTEGER DEFAULT 0,
-        room_id INTEGER,
-        FOREIGN KEY(customer_id) REFERENCES customer(customer_id),
-        FOREIGN KEY(room_id) REFERENCES room(room_id)
-    )''')
-
-    cur.execute('''CREATE TABLE service (
-        service_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        service_name TEXT,
-        description TEXT,
-        base_price REAL
-    )''')
-
-    cur.execute('''CREATE TABLE reservation_services (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        reservation_id INTEGER,
-        service_id INTEGER,
-        quantity INTEGER,
-        service_price REAL,
-        FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id),
-        FOREIGN KEY(service_id) REFERENCES service(service_id)
-    )''')
-
-    cur.execute('''CREATE TABLE waitlist (
-        waitlist_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id INTEGER,
-        requested_service TEXT,
-        timestamp TEXT,
-        FOREIGN KEY(customer_id) REFERENCES customer(customer_id)
-    )''')
-
-    # MODIFIED: Added discount_amount
-    cur.execute('''CREATE TABLE billing (
-        billing_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        reservation_id INTEGER,
-        initial_deposit REAL DEFAULT 0.0, 
-        service_charges REAL DEFAULT 0.0, 
-        discount_amount REAL DEFAULT 0.0,
-        final_amount REAL,
-        amount_paid REAL DEFAULT 0.0,
-        status TEXT,
-        created_at TEXT,
-        FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id)
-    )''')
-
-    cur.execute('''CREATE TABLE payment (
-        payment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        billing_id INTEGER,
-        customer_id INTEGER,
-        payment_method TEXT,
-        amount REAL,
-        payment_date TEXT,
-        FOREIGN KEY(billing_id) REFERENCES billing(billing_id),
-        FOREIGN KEY(customer_id) REFERENCES customer(customer_id)
-    )''')
+    # 1. Create Tables (Same as before)
+    cur.execute('''CREATE TABLE admin (admin_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)''')
+    cur.execute('''CREATE TABLE customer (customer_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, full_name TEXT, email TEXT, contact_number TEXT)''')
+    cur.execute('''CREATE TABLE resort_info (id INTEGER PRIMARY KEY AUTOINCREMENT, max_capacity INTEGER)''')
+    cur.execute('''CREATE TABLE room (room_id INTEGER PRIMARY KEY AUTOINCREMENT, room_number TEXT UNIQUE, room_capacity INTEGER, status TEXT, type TEXT)''')
     
-    cur.execute('''CREATE TABLE receipt (
-        receipt_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        billing_id INTEGER,
-        receipt_no TEXT,
-        issued_at TEXT,
-        content TEXT,
-        FOREIGN KEY(billing_id) REFERENCES billing(billing_id)
+    # Reservation with Guest Breakdown
+    cur.execute('''CREATE TABLE reservation (
+        reservation_id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, check_in_date TEXT, check_out_date TEXT, 
+        check_out_date_actual TEXT, num_guests INTEGER, count_adults INTEGER DEFAULT 0, count_kids INTEGER DEFAULT 0, 
+        count_pwd INTEGER DEFAULT 0, count_seniors INTEGER DEFAULT 0, status TEXT, notes TEXT, created_at TEXT, 
+        is_cancelled INTEGER DEFAULT 0, room_id INTEGER,
+        FOREIGN KEY(customer_id) REFERENCES customer(customer_id), FOREIGN KEY(room_id) REFERENCES room(room_id)
     )''')
+
+    cur.execute('''CREATE TABLE service (service_id INTEGER PRIMARY KEY AUTOINCREMENT, service_name TEXT, description TEXT, base_price REAL)''')
+    cur.execute('''CREATE TABLE reservation_services (id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_id INTEGER, service_id INTEGER, quantity INTEGER, service_price REAL, FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id), FOREIGN KEY(service_id) REFERENCES service(service_id))''')
+    cur.execute('''CREATE TABLE waitlist (waitlist_id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, requested_service TEXT, timestamp TEXT, FOREIGN KEY(customer_id) REFERENCES customer(customer_id))''')
+    
+    # Billing with Discount
+    cur.execute('''CREATE TABLE billing (
+        billing_id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_id INTEGER, initial_deposit REAL DEFAULT 0.0, 
+        service_charges REAL DEFAULT 0.0, discount_amount REAL DEFAULT 0.0, final_amount REAL, amount_paid REAL DEFAULT 0.0, 
+        status TEXT, created_at TEXT, FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id)
+    )''')
+
+    cur.execute('''CREATE TABLE payment (payment_id INTEGER PRIMARY KEY AUTOINCREMENT, billing_id INTEGER, customer_id INTEGER, payment_method TEXT, amount REAL, payment_date TEXT, FOREIGN KEY(billing_id) REFERENCES billing(billing_id), FOREIGN KEY(customer_id) REFERENCES customer(customer_id))''')
+    cur.execute('''CREATE TABLE receipt (receipt_id INTEGER PRIMARY KEY AUTOINCREMENT, billing_id INTEGER, receipt_no TEXT, issued_at TEXT, content TEXT, FOREIGN KEY(billing_id) REFERENCES billing(billing_id))''')
 
     # 2. Seed Data
     cur.execute('INSERT INTO admin (username, password) VALUES (?, ?)', ('admin', 'admin'))
@@ -129,6 +49,10 @@ else:
         ('Meal: Couple (2 Pax)', 'Set meal for 2 people', 600.0),
         ('Meal: Family (4-6 Pax)', 'Bundle for 4-6 people', 1500.0),
         ('Meal: Feast (6-10 Pax)', 'Bundle for 6-10 people', 2800.0),
+        
+        # Added Karaoke Here
+        ('Karaoke Rental', 'Per hour/session use', 500.0), 
+        
         ('Pool Access', 'Pool day pass per pax', 250.0),
         ('Spa Session', '60-min spa per pax', 800.0),
         ('Banana Boat', 'Per ride per group', 1500.0),
@@ -139,29 +63,15 @@ else:
 
     cur.execute('INSERT INTO resort_info (max_capacity) VALUES (?)', (100,))
 
-    rooms_data = []
-    rooms_data.append(('Single 101', 1, 'available', 'Room'))
-    rooms_data.append(('Single 102', 1, 'available', 'Room'))
-    rooms_data.append(('Double 201', 2, 'available', 'Room'))
-    rooms_data.append(('Double 202', 2, 'available', 'Room'))
-    rooms_data.append(('Double 203', 2, 'available', 'Room'))
-    rooms_data.append(('Double 204', 2, 'available', 'Room'))
-    rooms_data.append(('Family 301', 4, 'available', 'Room'))
-    rooms_data.append(('Family 302', 4, 'available', 'Room'))
-    rooms_data.append(('Family 303', 4, 'available', 'Room'))
-    rooms_data.append(('Family 304', 4, 'available', 'Room'))
-    rooms_data.append(('Suite 401', 6, 'available', 'Room'))
-    rooms_data.append(('Suite 402', 6, 'available', 'Room'))
-    rooms_data.append(('Suite 403', 6, 'available', 'Room'))
-    rooms_data.append(('Suite 404', 6, 'available', 'Room'))
-    rooms_data.append(('Cottage 01', 10, 'available', 'Cottage'))
-    rooms_data.append(('Cottage 02', 10, 'available', 'Cottage'))
-    rooms_data.append(('Cottage 03', 10, 'available', 'Cottage'))
-    rooms_data.append(('Cottage 04', 10, 'available', 'Cottage'))
-    rooms_data.append(('Cottage 05', 10, 'available', 'Cottage'))
-
+    rooms_data = [
+        ('Single 101', 1, 'available', 'Room'), ('Single 102', 1, 'available', 'Room'),
+        ('Double 201', 2, 'available', 'Room'), ('Double 202', 2, 'available', 'Room'), ('Double 203', 2, 'available', 'Room'), ('Double 204', 2, 'available', 'Room'),
+        ('Family 301', 4, 'available', 'Room'), ('Family 302', 4, 'available', 'Room'), ('Family 303', 4, 'available', 'Room'), ('Family 304', 4, 'available', 'Room'),
+        ('Suite 401', 6, 'available', 'Room'), ('Suite 402', 6, 'available', 'Room'), ('Suite 403', 6, 'available', 'Room'), ('Suite 404', 6, 'available', 'Room'),
+        ('Cottage 01', 10, 'available', 'Cottage'), ('Cottage 02', 10, 'available', 'Cottage'), ('Cottage 03', 10, 'available', 'Cottage'), ('Cottage 04', 10, 'available', 'Cottage'), ('Cottage 05', 10, 'available', 'Cottage')
+    ]
     cur.executemany('INSERT INTO room (room_number, room_capacity, status, type) VALUES (?, ?, ?, ?)', rooms_data)
 
     conn.commit()
     conn.close()
-    print('resort.db created.')
+    print('resort.db updated with Karaoke and Pricing.')
