@@ -69,16 +69,15 @@ class WindowManager:
         # Action Buttons
         ctk.CTkLabel(frame, text="Actions", font=("Helvetica", 18)).pack(pady=10)
         
-        # Note: These commands assume the Main App has methods to route to appropriate controllers
-        # or that you will attach specific controllers (e.g. self.app.payment_controller.show...) later.
+        # Links now correctly point to methods in MainApp
         ctk.CTkButton(frame, text="View Reservations", command=self.app.show_customer_reservations).pack(pady=10)
         ctk.CTkButton(frame, text="View Services and Billing", command=self.app.show_customer_services).pack(pady=10)
         ctk.CTkButton(frame, text="View Payments / Receipts", command=self.app.payment_controller.show_receipts).pack(pady=10)
         
         # Back button to Admin/Main Menu
         if hasattr(self.app, 'is_admin_mode') and self.app.is_admin_mode:
-            # Calls CustomerController (to be defined in #4) via main app routing
-            ctk.CTkButton(frame, text="Back to Admin Customer Lookup", command=self.app.customer_controller.customer_lookup_admin).pack(pady=30)
+            # Calls AdminDashboard to go to Admin Customer Dashboard for continuity
+            ctk.CTkButton(frame, text="Back to Admin Customer Lookup", command=self.app.admin_dashboard.show_admin_customer_dashboard).pack(pady=30)
         else:
             ctk.CTkButton(frame, text="Logout", command=self.show_main_menu).pack(pady=30)
 

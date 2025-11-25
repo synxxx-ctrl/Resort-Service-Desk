@@ -73,14 +73,20 @@ class CustomerModel:
         billing = query("SELECT * FROM billing WHERE reservation_id = ?", (reservation_id,), fetchone=True)
 
         if billing:
-            # Simple calculation: initial deposit + service charges
-            final_amount = billing['initial_deposit'] + service_total
-            execute("UPDATE billing SET final_amount=?, service_charges=?, status=? WHERE billing_id=?", (final_amount, service_total, 'Unpaid', billing['billing_id']))
+            # FIX: Use existing initial deposit and amount paid
+            initial_deposit = billing['initial_deposit'] if billing['initial_deposit'] is not None else 0.0
+            amount_paid = billing['amount_paid'] if billing['amount_paid'] is not None else 0.0
+            
+            final_amount = initial_deposit + service_total
+            status = 'Paid' if amount_paid >= final_amount else 'Unpaid'
+            
+            execute("UPDATE billing SET final_amount=?, service_charges=?, status=?, amount_paid=? WHERE billing_id=?", 
+                    (final_amount, service_total, status, amount_paid, billing['billing_id']))
             return billing['billing_id']
         else:
-            # If no billing record exists, create one with 0 deposit
+            # If no billing record exists, create one with 0 deposit/paid
             final_amount = service_total
-            bid = execute("INSERT INTO billing (reservation_id, initial_deposit, service_charges, final_amount, amount_paid, status) VALUES (?, ?, ?, ?, ?, ?)", 
+            bid = execute("INSERT INTO billing (reservation_id, initial_deposit, service_charges, final_amount, amount_paid, status, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))", 
                           (reservation_id, 0.0, service_total, final_amount, 0.0, 'Unpaid'))
             return bid
 
@@ -93,8 +99,12 @@ class CustomerModel:
              CustomerModel.calculate_and_create_bill(reservation_id)
              billing_row = query("SELECT * FROM billing WHERE reservation_id = ?", (reservation_id,), fetchone=True)
 
-        new_paid = billing_row['amount_paid'] + amount
-        status = 'Paid' if new_paid >= billing_row['final_amount'] else 'Partial'
+        # FIX: Ensure we start with the existing amount_paid
+        current_paid = billing_row['amount_paid'] if billing_row['amount_paid'] is not None else 0.0
+        final_amount = billing_row['final_amount'] if billing_row['final_amount'] is not None else 0.0
+        
+        new_paid = current_paid + amount
+        status = 'Paid' if new_paid >= final_amount else 'Partial'
         
         execute("UPDATE billing SET amount_paid=?, status=? WHERE billing_id=?", (new_paid, status, billing_row['billing_id']))
 
@@ -106,6 +116,7 @@ class CustomerModel:
     @staticmethod
     def checkout_reservation(reservation_id):
         """Marks the reservation as Checked-out."""
+        # Use ISO format for actual check-out date
         execute("UPDATE reservation SET status='Checked-out', check_out_date_actual=datetime('now') WHERE reservation_id=?", (reservation_id,))
 
     @staticmethod
@@ -118,6 +129,7 @@ class CustomerModel:
                 r.check_in_date, 
                 r.check_out_date, 
                 r.num_guests, 
+                r.status, /* ADDED Status */
                 s.service_name, 
                 rs.quantity, 
                 rs.service_price
@@ -164,6 +176,7 @@ class RoomModel:
                 SELECT reservation.room_id FROM reservation
                 WHERE reservation.room_id IS NOT NULL 
                 AND reservation.is_cancelled = 0 
+                AND reservation.status NOT IN ('Checked-out', 'Cancelled') /* Exclude finalized reservations */
                 AND (
                     -- New reservation conflicts with existing one
                     (? < check_out_date AND ? >= check_in_date)
@@ -177,3 +190,32 @@ class RoomModel:
     def set_room_status(room_id, status):
         """Updates the status of a room (e.g., 'available', 'booked')."""
         execute("UPDATE room SET status=? WHERE room_id=?", (status, room_id))
+
+class ResortModel:
+    @staticmethod
+    def get_max_capacity():
+        row = query("SELECT max_capacity FROM resort_info LIMIT 1", fetchone=True)
+        return row['max_capacity'] if row else 100
+
+    @staticmethod
+    def check_capacity_availability(check_in_str, check_out_str, new_guests):
+        """
+        Checks if adding 'new_guests' will exceed the resort's global max_capacity
+        during the specified date range.
+        """
+        max_cap = ResortModel.get_max_capacity()
+        
+        # Calculate total guests in active reservations that overlap with the requested dates
+        # Overlap logic: (StartA < EndB) and (EndA > StartB)
+        row = query("""
+            SELECT SUM(num_guests) as current_load 
+            FROM reservation 
+            WHERE status NOT IN ('Checked-out', 'Cancelled')
+            AND (check_in_date < ? AND check_out_date > ?)
+        """, (check_out_str, check_in_str), fetchone=True)
+        
+        current_load = row['current_load'] if row and row['current_load'] else 0
+        
+        if (current_load + new_guests) > max_cap:
+            return False, max_cap, current_load
+        return True, max_cap, current_load
