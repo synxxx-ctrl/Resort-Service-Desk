@@ -123,13 +123,7 @@ class AdminDashboard:
             command=self.app.reservation_controller.show_make_reservation
         ).pack(pady=8)
         
-        # Route to ReservationController (as per your list #5)
-        ctk.CTkButton(
-            frame, 
-            text="Check-in Right Now (No dates)", 
-            width=240, 
-            command=self.app.reservation_controller.check_in_now
-        ).pack(pady=8)
+        # --- REMOVED: "Check-in Right Now" button is deleted here ---
         
         # Route to CustomerController
         ctk.CTkButton(
@@ -154,7 +148,7 @@ class AdminDashboard:
             command=self.app.payment_controller.show_receipts
         ).pack(pady=8)
 
-        # Return to the main admin interface (Calling method within this class)
+        # Return to the main admin interface
         ctk.CTkButton(
             frame, 
             text="Back to Admin Menu", 
