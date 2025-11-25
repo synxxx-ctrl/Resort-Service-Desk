@@ -1,20 +1,25 @@
 import customtkinter as ctk
 from tkinter import messagebox, simpledialog
 from datetime import datetime, date, timedelta
-from db import query  # adjust if your db import path is different
+from db import query
 
 class ReportController:
     def __init__(self, app):
         """
-        app = reference to MainApp (needed for UI functions like open_text_window)
+        Initialize the ReportController.
+        :param app: Reference to the main application class.
         """
         self.app = app
 
-    # ---------------------- Report Menu ----------------------
     def generate_report(self):
+        # Parent window is self.app
         win = ctk.CTkToplevel(self.app)
         win.title("Generate Report")
         win.geometry("360x320")
+        
+        # Make the report window modal/transient
+        win.transient(self.app)
+        win.grab_set()
 
         ctk.CTkLabel(win, text="Choose Report Type", font=("Helvetica", 18)).pack(pady=12)
 
@@ -48,7 +53,7 @@ class ReportController:
             command=win.destroy
         ).pack(pady=8)
 
-    # ---------------------- Full Report ----------------------
+    # ------------------------- Reports -------------------------
     def generate_full_report(self):
         try:
             rows = query("""
@@ -67,7 +72,7 @@ class ReportController:
             """, fetchall=True)
 
             if not rows:
-                self.open_text_window("Full Report", "No reservation data found.")
+                self.app.window_manager.open_text_window("Full Report", "No reservation data found.")
                 return
 
             txt = ""
@@ -83,12 +88,11 @@ class ReportController:
                     f"{'-'*60}\n"
                 )
 
-            self.open_text_window("Full Report", txt)
+            self.app.window_manager.open_text_window("Full Report", txt)
 
         except Exception as e:
             messagebox.showerror("DB Error", f"Could not generate full report:\n{e}")
 
-    # ---------------------- Daily Report Prompt ----------------------
     def generate_daily_report_prompt(self):
         date_str = simpledialog.askstring(
             "Daily Report",
@@ -106,24 +110,20 @@ class ReportController:
         
         self.generate_range_report(date_str, date_str, f"Daily Report - {date_str}")
 
-    # ---------------------- Daily Report ----------------------
     def generate_daily_report(self, date_str):
-        # backward compatibility (calls range reporter)
+        # kept for backward compatibility (calls range reporter)
         self.generate_range_report(date_str, date_str, f"Daily Report - {date_str}")
 
-    # ---------------------- Weekly Report ----------------------
     def generate_weekly_report(self):
         end = date.today()
-        start = end - timedelta(days=6)
+        start = end - timedelta(days=6)  # last 7 days inclusive
         self.generate_range_report(start.isoformat(), end.isoformat(), "Weekly Report (Last 7 Days)")
 
-    # ---------------------- Monthly Report ----------------------
     def generate_monthly_report(self):
         end = date.today()
-        start = end - timedelta(days=29)
+        start = end - timedelta(days=29)  # last 30 days inclusive
         self.generate_range_report(start.isoformat(), end.isoformat(), "Monthly Report (Last 30 Days)")
 
-    # ---------------------- Custom Range Prompt ----------------------
     def generate_range_prompt(self):
         start_str = simpledialog.askstring("Report Start Date", "Enter start date (YYYY-MM-DD):", parent=self.app)
         if not start_str:
@@ -131,6 +131,7 @@ class ReportController:
         end_str = simpledialog.askstring("Report End Date", "Enter end date (YYYY-MM-DD):", parent=self.app)
         if not end_str:
             return
+        # validate
         try:
             s = datetime.strptime(start_str, "%Y-%m-%d").date()
             e = datetime.strptime(end_str, "%Y-%m-%d").date()
@@ -142,7 +143,6 @@ class ReportController:
             return
         self.generate_range_report(start_str, end_str, f"Report: {start_str} to {end_str}")
 
-    # ---------------------- Range Report ----------------------
     def generate_range_report(self, start_date_str, end_date_str, title):
         try:
             rows = query("""
@@ -164,7 +164,7 @@ class ReportController:
             """, (start_date_str, end_date_str, start_date_str, end_date_str), fetchall=True)
 
             if not rows:
-                self.open_text_window(title, f"No reservations found between {start_date_str} and {end_date_str}.")
+                self.app.window_manager.open_text_window(title, f"No reservations found between {start_date_str} and {end_date_str}.")
                 return
 
             lines = []
@@ -181,16 +181,7 @@ class ReportController:
                 )
 
             report_text = "\n".join(lines)
-            self.open_text_window(title, report_text)
+            self.app.window_manager.open_text_window(title, report_text)
 
         except Exception as e:
             messagebox.showerror("DB Error", f"Could not generate report:\n{e}")
-
-    # ---------------------- Helper ----------------------
-    def open_text_window(self, title, content):
-        win = ctk.CTkToplevel(self.app)
-        win.title(title)
-        win.geometry("600x500")
-        frame = ctk.CTkScrollableFrame(win)
-        frame.pack(expand=True, fill="both", padx=10, pady=10)
-        ctk.CTkLabel(frame, text=content, justify="left").pack(anchor="w")
