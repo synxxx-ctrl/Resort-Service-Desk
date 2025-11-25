@@ -1,55 +1,52 @@
 import customtkinter as ctk
-from admin_dashboard import AdminDashboard
+
+# --- Import all your controllers ---
 from auth_controller import AuthController
+from window_manager import WindowManager
+from admin_dashboard import AdminDashboard
 from customer_controller import CustomerController
 from reservation_controller import ReservationController
-from transaction_controller import TransactionController
+from check_in import CheckInOutController       # Was missing in your snippet
+from payment_controller import PaymentController # Was missing in your snippet
 from report_controller import ReportController
-from window_manager import WindowManager
+from transaction_controller import TransactionController
 
 class MainApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+        
+        # 1. Basic Window Setup
         self.title("Resort Service Desk")
         self.geometry("1100x700")
 
-        # ---------------- State ----------------
+        # 2. Shared State Variables
+        # These are accessed by controllers using self.app.variable_name
         self.current_customer = None
         self.is_admin_mode = False
         self.cart = []
         self.open_windows = {}
+        self.container = None  # Will be created by WindowManager
 
-        # ---------------- Controllers ----------------
+        # 3. Initialize Controllers
+        # We pass 'self' so controllers can access the app and other controllers
         self.window_manager = WindowManager(self)
-        self.auth = AuthController(self)
+        self.auth_controller = AuthController(self)
         self.admin_dashboard = AdminDashboard(self)
         self.customer_controller = CustomerController(self)
         self.reservation_controller = ReservationController(self)
+        self.check_in_controller = CheckInOutController(self)
+        self.payment_controller = PaymentController(self)
+        self.report_controller = ReportController(self)
         self.transaction_controller = TransactionController(self)
-        self.report_controller = ReportController(self)  # <-- Added report controller
 
-        # ---------------- Start App ----------------
-        self.show_main_menu()
-
-    # ---------------- Main Menu ----------------
-    def show_main_menu(self):
-        self.clear_container()
-        container = ctk.CTkFrame(self)
-        container.pack(fill="both", expand=True)
-        self.container = container
-
-        ctk.CTkLabel(container, text="Welcome to the Main Menu", font=("Helvetica", 30)).pack(pady=50)
-        ctk.CTkButton(container, text="Admin Login", command=self.auth.open_admin_login).pack(pady=10)
-        ctk.CTkButton(container, text="Exit", command=self.quit).pack(pady=10)
-        self.is_admin_mode = False
-
-    # ---------------- Utility ----------------
-    def clear_container(self):
-        if hasattr(self, 'container') and self.container.winfo_exists():
-            for widget in self.container.winfo_children():
-                widget.destroy()
-
+        # 4. Start the Application Flow
+        # We delegate the UI creation to the WindowManager
+        self.window_manager.show_main_menu()
 
 if __name__ == "__main__":
+    # Optional: Set theme
+    ctk.set_appearance_mode("System") 
+    ctk.set_default_color_theme("blue")
+    
     app = MainApp()
     app.mainloop()
