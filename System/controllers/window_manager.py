@@ -108,3 +108,5 @@ class WindowManager:
             lbl.pack(anchor='w')
             return w
         self.focus_or_create_window(title, create)
+
+        

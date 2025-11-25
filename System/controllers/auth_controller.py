@@ -117,3 +117,5 @@ class AuthController:
             messagebox.showinfo("Success", "Admin credentials updated.")
         else:
             messagebox.showerror("Error", "Admin record not found.")
+
+            
