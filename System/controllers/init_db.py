@@ -2,18 +2,17 @@ from db import execute, get_conn
 import os
 
 if os.path.exists('resort.db'):
-    print('resort.db already exists - skipping creation. Delete the file to recreate with Karaoke and new pricing logic.')
+    print('resort.db already exists - skipping creation. Delete the file to recreate with Cashier Name support.')
 else:
     conn = get_conn()
     cur = conn.cursor()
 
-    # 1. Create Tables (Same as before)
+    # 1. Create Tables
     cur.execute('''CREATE TABLE admin (admin_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)''')
     cur.execute('''CREATE TABLE customer (customer_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, full_name TEXT, email TEXT, contact_number TEXT)''')
     cur.execute('''CREATE TABLE resort_info (id INTEGER PRIMARY KEY AUTOINCREMENT, max_capacity INTEGER)''')
     cur.execute('''CREATE TABLE room (room_id INTEGER PRIMARY KEY AUTOINCREMENT, room_number TEXT UNIQUE, room_capacity INTEGER, status TEXT, type TEXT)''')
     
-    # Reservation with Guest Breakdown
     cur.execute('''CREATE TABLE reservation (
         reservation_id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, check_in_date TEXT, check_out_date TEXT, 
         check_out_date_actual TEXT, num_guests INTEGER, count_adults INTEGER DEFAULT 0, count_kids INTEGER DEFAULT 0, 
@@ -26,11 +25,12 @@ else:
     cur.execute('''CREATE TABLE reservation_services (id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_id INTEGER, service_id INTEGER, quantity INTEGER, service_price REAL, FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id), FOREIGN KEY(service_id) REFERENCES service(service_id))''')
     cur.execute('''CREATE TABLE waitlist (waitlist_id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, requested_service TEXT, timestamp TEXT, FOREIGN KEY(customer_id) REFERENCES customer(customer_id))''')
     
-    # Billing with Discount
+    # MODIFIED: Added cashier_name
     cur.execute('''CREATE TABLE billing (
         billing_id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_id INTEGER, initial_deposit REAL DEFAULT 0.0, 
         service_charges REAL DEFAULT 0.0, discount_amount REAL DEFAULT 0.0, final_amount REAL, amount_paid REAL DEFAULT 0.0, 
-        status TEXT, created_at TEXT, FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id)
+        status TEXT, cashier_name TEXT DEFAULT 'Admin Cashier', created_at TEXT, 
+        FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id)
     )''')
 
     cur.execute('''CREATE TABLE payment (payment_id INTEGER PRIMARY KEY AUTOINCREMENT, billing_id INTEGER, customer_id INTEGER, payment_method TEXT, amount REAL, payment_date TEXT, FOREIGN KEY(billing_id) REFERENCES billing(billing_id), FOREIGN KEY(customer_id) REFERENCES customer(customer_id))''')
@@ -49,10 +49,7 @@ else:
         ('Meal: Couple (2 Pax)', 'Set meal for 2 people', 600.0),
         ('Meal: Family (4-6 Pax)', 'Bundle for 4-6 people', 1500.0),
         ('Meal: Feast (6-10 Pax)', 'Bundle for 6-10 people', 2800.0),
-        
-        # Added Karaoke Here
-        ('Karaoke Rental', 'Per hour/session use', 500.0), 
-        
+        ('Karaoke Rental', 'Per hour/session use', 500.0),
         ('Pool Access', 'Pool day pass per pax', 250.0),
         ('Spa Session', '60-min spa per pax', 800.0),
         ('Banana Boat', 'Per ride per group', 1500.0),
@@ -74,4 +71,4 @@ else:
 
     conn.commit()
     conn.close()
-    print('resort.db updated with Karaoke and Pricing.')
+    print('resort.db updated.')
