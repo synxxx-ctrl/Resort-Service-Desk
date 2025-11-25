@@ -2,7 +2,7 @@ import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
 from db import query, execute
-from models import CustomerModel
+from models import CustomerModel, RoomModel # ADDED RoomModel
 
 class CheckInOutController:
     def __init__(self, app):
@@ -20,22 +20,25 @@ class CheckInOutController:
 
         ctk.CTkLabel(frame, text="Currently Checked-in Guests", font=("Helvetica", 22)).pack(pady=10)
         
-        # Correct query using SUM(payment.amount)
+        # Correct query using billing fields (since they now exist after schema update)
         rows = query("""
             SELECT 
-                r.*,
+                r.reservation_id,
+                r.check_in_date,
+                r.check_out_date,
+                r.num_guests,
+                r.status,
+                r.room_id,
                 c.full_name, 
                 c.username AS customer_code, 
                 rm.room_number,
                 b.final_amount,
-                IFNULL(SUM(p.amount), 0) AS amount_paid
+                b.amount_paid
             FROM reservation r
             JOIN customer c ON r.customer_id = c.customer_id
             LEFT JOIN room rm ON r.room_id = rm.room_id
             LEFT JOIN billing b ON r.reservation_id = b.reservation_id
-            LEFT JOIN payment p ON p.billing_id = b.billing_id
             WHERE r.status = 'Checked-in'
-            GROUP BY r.reservation_id
             ORDER BY r.check_in_date DESC
         """, fetchall=True)
 
@@ -46,13 +49,13 @@ class CheckInOutController:
                 res_frame = ctk.CTkFrame(frame, corner_radius=6)
                 res_frame.pack(fill='x', padx=10, pady=5)
                 
-                # Calculate balance
+                # Calculate balance using fields from billing table
                 final_amount = row['final_amount'] if row['final_amount'] is not None else 0
                 amount_paid = row['amount_paid'] if row['amount_paid'] is not None else 0
                 balance_due = final_amount - amount_paid
 
                 info = (
-                    f"ID: {row['reservation_id']} | Room: {row['room_number']} | Guests: {row['num_guests']}\n"
+                    f"ID: {row['reservation_id']} | Room: {row['room_number'] if row['room_number'] else 'N/A'} | Guests: {row['num_guests']}\n"
                     f"Customer: {row['full_name']} (Code: {row['customer_code']})\n"
                     f"Dates: {row['check_in_date']} to {row['check_out_date']} (Expected)\n"
                     f"Status: {row['status']} | Final Amount: ₱{final_amount:.2f}\n"
@@ -79,7 +82,7 @@ class CheckInOutController:
         frame = ctk.CTkScrollableFrame(self.app.container, corner_radius=8)
         frame.pack(pady=20, padx=20, expand=True, fill="both")
 
-        ctk.CTkLabel(frame, text=f"Check-out: Reservation #{reservation_id} (Room {room_number})", font=("Helvetica", 22)).pack(pady=10)
+        ctk.CTkLabel(frame, text=f"Check-out: Reservation #{reservation_id} (Room {room_number if room_number else 'N/A'})", font=("Helvetica", 22)).pack(pady=10)
         
         reservation = query("SELECT r.*, c.full_name, c.customer_id FROM reservation r JOIN customer c ON r.customer_id = c.customer_id WHERE r.reservation_id = ?", (reservation_id,), fetchone=True)
         
@@ -89,19 +92,19 @@ class CheckInOutController:
             return
         
         # 1. Billing Summary
-        # Ensure a billing record exists and is up-to-date
+        # Ensure a billing record exists and is up-to-date (updates final_amount based on services)
         CustomerModel.calculate_and_create_bill(reservation_id)
         billing = query("SELECT * FROM billing WHERE reservation_id = ?", (reservation_id,), fetchone=True)
         
+        # FIX: Ensure billing exists
+        if not billing:
+             messagebox.showerror("Error", "Billing record not found for this reservation.")
+             self.show_check_in_list()
+             return
+
         # Calculate Final Amount Due
-        final_amount = billing['final_amount']
-        
-        # Determine amount paid so far
-        if 'amount_paid' in billing and billing['amount_paid'] is not None:
-             amount_paid = billing['amount_paid']
-        else:
-             paid_row = query("SELECT SUM(amount) as total FROM payment WHERE billing_id=?", (billing['billing_id'],), fetchone=True)
-             amount_paid = paid_row['total'] if paid_row and paid_row['total'] else 0.0
+        final_amount = billing['final_amount'] if billing['final_amount'] is not None else 0.0
+        amount_paid = billing['amount_paid'] if billing['amount_paid'] is not None else 0.0
 
         balance_due = final_amount - amount_paid
 
@@ -119,12 +122,14 @@ class CheckInOutController:
         ctk.CTkFrame(frame, height=2, corner_radius=0, fg_color='gray').pack(fill='x', padx=5, pady=15)
         ctk.CTkLabel(frame, text="Process Final Payment", font=("Helvetica", 18)).pack(pady=5)
 
+        # FIX: Ensure we use balance_due for initial amount
         amount_var = tk.StringVar(value=f"{balance_due:.2f}" if balance_due > 0 else "0.00")
-        payment_methods = ['Cash', 'Credit Card', 'Bank Transfer', 'No Payment Due']
+        payment_methods = ['Cash', 'Credit Card', 'Bank Transfer', 'E-Wallet', 'No Payment Due']
         method_var = tk.StringVar(value='No Payment Due' if balance_due <= 0 else payment_methods[0])
         
         ctk.CTkLabel(frame, text="Payment Amount:").pack(pady=2)
-        amount_entry = ctk.CTkEntry(frame, textvariable=amount_var, state='normal' if balance_due > 0 else 'disabled')
+        # FIX: Use 'readonly' state for 0 balance, but allow 'normal' for balance > 0
+        amount_entry = ctk.CTkEntry(frame, textvariable=amount_var, state='readonly' if balance_due <= 0 else 'normal')
         amount_entry.pack(pady=2)
 
         ctk.CTkLabel(frame, text="Payment Method:").pack(pady=2)
@@ -151,16 +156,17 @@ class CheckInOutController:
 
             try:
                 # 1. Record the payment if amount > 0
-                if pay_amount > 0:
+                if pay_amount > 0 and method != 'No Payment Due':
                     CustomerModel.record_payment(reservation_id, reservation['customer_id'], pay_amount, method)
                 
                 # 2. Finalize Check-out in the database
                 CustomerModel.checkout_reservation(reservation_id)
                 
-                # 3. Mark room as available
-                execute("UPDATE room SET status='available' WHERE room_id=?", (room_id,))
+                # 3. Mark room as available (Only if room_id exists)
+                if room_id:
+                    RoomModel.set_room_status(room_id, 'available')
                 
-                messagebox.showinfo("Success", f"Reservation #{reservation_id} checked out successfully. Room {room_number} is now available.")
+                messagebox.showinfo("Success", f"Reservation #{reservation_id} checked out successfully. Room {room_number if room_number else 'N/A'} is now available.")
                 self.show_check_in_list() # Return to the check-in list
                 
             except Exception as e:

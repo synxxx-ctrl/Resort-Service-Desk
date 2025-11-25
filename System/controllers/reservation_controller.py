@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 from datetime import datetime, date, timedelta
 from db import get_conn, query
-from models import RoomModel
+from models import RoomModel, ResortModel
 
 # Try importing tkcalendar
 try:
@@ -42,11 +42,12 @@ class ReservationController:
         
         ctk.CTkLabel(frame, text="All Reservations", font=("Helvetica", 22)).pack(pady=8)
         
-        # Query all reservations joined with customer names
+        # Query all reservations joined with customer names and room numbers
         rows = query("""
-            SELECT r.reservation_id, c.full_name, r.check_in_date, r.check_out_date, r.status, r.num_guests
+            SELECT r.reservation_id, c.full_name, r.check_in_date, r.check_out_date, r.status, r.num_guests, rm.room_number
             FROM reservation r
             JOIN customer c ON r.customer_id = c.customer_id
+            LEFT JOIN room rm ON r.room_id = rm.room_id
             ORDER BY r.reservation_id DESC
         """, fetchall=True)
         
@@ -57,8 +58,9 @@ class ReservationController:
                 r_frame = ctk.CTkFrame(frame)
                 r_frame.pack(fill='x', pady=4, padx=6)
                 
+                room_txt = f"Room: {r['room_number'] if r['room_number'] else 'N/A'}"
                 # Format the display info
-                info = (f"ID: {r['reservation_id']} | Customer: {r['full_name']}\n"
+                info = (f"ID: {r['reservation_id']} | Customer: {r['full_name']} | {room_txt}\n"
                         f"Check-in: {r['check_in_date']} | Check-out: {r['check_out_date']}\n"
                         f"Guests: {r['num_guests']} | Status: {r['status']}")
                 
@@ -184,9 +186,9 @@ class ReservationController:
             
             # Access self.app.cart instead of self.cart
             for item in self.app.cart:
-                if item['service_id'] == service_id and item['mode'] == mode_var.get():
+                if item['service_id'] == service_id:
                     item['qty'] += qty
-                    self.update_cart_preview(right)
+                    self.update_cart_preview()
                     return
             
             self.app.cart.append({
@@ -196,7 +198,7 @@ class ReservationController:
                 'qty': qty,
                 'mode': mode_var.get()
             })
-            self.update_cart_preview(right)
+            self.update_cart_preview()
 
         for svc in services:
             sid = svc['service_id']
@@ -234,7 +236,7 @@ class ReservationController:
         def clear_cart_action(): 
             if messagebox.askyesno('Clear Cart','Remove all items from cart?'):
                 self.app.cart = []
-                self.update_cart_preview(right)
+                self.update_cart_preview()
 
         btns = ctk.CTkFrame(right)
         btns.pack(pady=8)
@@ -255,9 +257,9 @@ class ReservationController:
             command=self.app.admin_dashboard.show_admin_customer_dashboard
         ).pack(side='left', padx=6)
 
-        self.update_cart_preview(right)
+        self.update_cart_preview()
 
-    def update_cart_preview(self, parent_frame=None):
+    def update_cart_preview(self): 
         if not self.cart_items_container or not self.cart_items_container.winfo_exists():
             return
             
@@ -275,7 +277,7 @@ class ReservationController:
             ctk.CTkLabel(row, text=f"₱{subtotal:.2f}").pack(side='right')
             
             def make_rm(i):
-                return lambda: (self.app.cart.pop(i), self.update_cart_preview(parent_frame))
+                return lambda: (self.app.cart.pop(i), self.update_cart_preview()) 
                 
             ctk.CTkButton(row, text='Remove', width=80, command=make_rm(idx-1)).pack(side='right', padx=6)
             
@@ -324,7 +326,7 @@ class ReservationController:
                 
             def on_confirm():
                 selected_id = self.room_selection_dialog_var.get()
-                if selected_id == "":
+                if selected_id == "" or selected_id == "0":
                     messagebox.showerror("Error", "Please select a room.")
                     return
                 
@@ -367,7 +369,7 @@ class ReservationController:
                 messagebox.showerror('Date error','Please enter dates in YYYY-MM-DD')
                 return
         
-        if checkout < checkin:
+        if checkout <= checkin:
             messagebox.showerror('Date error','Check-out must be after check-in')
             return
         
@@ -379,40 +381,76 @@ class ReservationController:
         except Exception:
             messagebox.showerror('Guests','Enter a valid number of guests')
             return
+            
+        # 3. Room Validation
+        room_id = self.room_id_var.get()
+        room_id = int(room_id) if room_id.isdigit() else None
         
-        # 3. Calculation
+        # Check if cart has room/cottage service which requires a room assignment
+        requires_room = any('Room' in item['name'] or 'Cottage' in item['name'] for item in self.app.cart)
+
+        if requires_room:
+            if room_id is None or room_id == 0:
+                messagebox.showerror('Room Error', 'This reservation includes a room/cottage service. Please select an available room.')
+                return
+            
+            # Check capacity one last time 
+            room_cap = RoomModel.get_room_capacity(room_id)
+            if guests > room_cap:
+                 messagebox.showerror('Capacity Error', f'Selected room (Capacity: {room_cap}) cannot accommodate {guests} guests.')
+                 return
+        else:
+            # If no room-related service is in cart, force room_id to None
+            room_id = None
+
+        # 4. Calculation
         total = sum(item['unit_price'] * item['qty'] for item in self.app.cart)
+        
+        # --- NEW: Global Capacity Check ---
+        is_avail, max_cap, current_load = ResortModel.check_capacity_availability(
+            checkin.isoformat(), checkout.isoformat(), guests
+        )
+        if not is_avail:
+            messagebox.showerror(
+                "Capacity Reached", 
+                f"Cannot proceed. Resort is near full capacity.\n"
+                f"Limit: {max_cap}\n"
+                f"Current Load during dates: {current_load}\n"
+                f"Attempting to add: {guests}"
+            )
+            return
+        # ----------------------------------
+
         items_summary = '\n'.join([f"{i['name']} ({i['mode']}) x{i['qty']} = ₱{i['unit_price']*i['qty']:.2f}" for i in self.app.cart])
         
-        confirm = messagebox.askyesno(
-            'Confirm Reservation', 
-            f"Check-in: {checkin}\nCheck-out: {checkout}\nGuests: {guests}\n\nServices:\n{items_summary if items_summary else 'No services selected'}\n\nTotal: ₱{total:.2f}\n\nProceed to save reservation?"
-        )
-        if not confirm:
-            return
-        
-        # 4. Save to DB
+        # 5. Save to DB
         try:
             conn = get_conn()
             cur = conn.cursor()
             created_at = datetime.now().isoformat(sep=' ', timespec='seconds')
             
-            # Access self.app.current_customer
+            # Save Reservation with Room ID
             cur.execute(
-                "INSERT INTO reservation (customer_id, check_in_date, check_out_date, num_guests, status, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (self.app.current_customer['customer_id'], checkin.isoformat(), checkout.isoformat(), guests, 'Pending', '', created_at)
+                "INSERT INTO reservation (customer_id, check_in_date, check_out_date, num_guests, status, notes, created_at, room_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (self.app.current_customer['customer_id'], checkin.isoformat(), checkout.isoformat(), guests, 'Pending', '', created_at, room_id)
             )
             reservation_id = cur.lastrowid
             
+            # Update room status to 'booked' only if a room was actually selected
+            if room_id:
+                RoomModel.set_room_status(room_id, 'booked') 
+            
+            # Save Services
             for item in self.app.cart:
                 cur.execute(
                     "INSERT INTO reservation_services (reservation_id, service_id, quantity, service_price) VALUES (?, ?, ?, ?)",
                     (reservation_id, item['service_id'], item['qty'], item['unit_price'])
                 )
             
+            # Save Billing
             cur.execute(
-                "INSERT INTO billing (reservation_id, final_amount, status, created_at) VALUES (?, ?, ?, ?)",
-                (reservation_id, total, 'Unpaid', created_at)
+                "INSERT INTO billing (reservation_id, final_amount, initial_deposit, service_charges, amount_paid, status, created_at) VALUES (?, ?, 0.0, ?, 0.0, ?, ?)",
+                (reservation_id, total, total, 'Unpaid', created_at) 
             )
             billing_id = cur.lastrowid
             conn.commit()
@@ -432,40 +470,11 @@ class ReservationController:
             messagebox.showerror("Error", "No customer loaded.")
             return
             
-        # Parent is self.app
+        # 1. Gather time/guest info
         s_in = simpledialog.askstring("Check-in time", "Enter check-in time (HH:MM, 24h). Example: 14:30", parent=self.app)
         s_out = simpledialog.askstring("Check-out time", "Enter check-out time (HH:MM, 24h). Example: 18:00", parent=self.app)
-        
         if not s_in or not s_out:
             return
-        try:
-            t_in = datetime.strptime(s_in.strip(), "%H:%M").time()
-            t_out = datetime.strptime(s_out.strip(), "%H:%M").time()
-        except Exception:
-            messagebox.showerror("Invalid time", "Time must be in HH:MM 24-hour format.")
-            return
-            
-        services = query("SELECT service_id, service_name, base_price FROM service", fetchall=True) or []
-        if not services:
-            messagebox.showerror("No services", "No services found in DB.")
-            return
-            
-        svc_names = [f"{s['service_id']} - {s['service_name']} (₱{s['base_price']})" for s in services]
-        svc_choice = simpledialog.askstring("Service", f"Pick service by entering its ID. Options:\n" + "\n".join(svc_names), parent=self.app)
-        
-        if not svc_choice:
-            return
-        try:
-            svc_id = int(svc_choice.split()[0])
-        except Exception:
-            messagebox.showerror("Invalid choice", "Provide a service id number from the list.")
-            return
-            
-        mode_choice = simpledialog.askstring("Mode", "Enter 'public' or 'private'", parent=self.app)
-        if not mode_choice or mode_choice.lower() not in ("public","private"):
-            messagebox.showerror("Invalid", "Mode must be 'public' or 'private'.")
-            return
-        mode_choice = mode_choice.lower()
         
         g = simpledialog.askstring("Guests", "Number of guests (integer):", parent=self.app)
         try:
@@ -476,48 +485,119 @@ class ReservationController:
             messagebox.showerror("Invalid", "Enter a valid integer for guests.")
             return
             
-        today = date.today()
-        checkin_dt = datetime.combine(today, t_in)
-        checkout_dt = datetime.combine(today, t_out)
-        
-        if checkout_dt <= checkin_dt:
-            checkout_dt += timedelta(days=1)
+        try:
+            t_in = datetime.strptime(s_in.strip(), "%H:%M").time()
+            t_out = datetime.strptime(s_out.strip(), "%H:%M").time()
+            today = date.today()
+            checkin_dt = datetime.combine(today, t_in)
+            checkout_dt = datetime.combine(today, t_out)
             
+            if checkout_dt <= checkin_dt:
+                checkout_dt += timedelta(days=1)
+                
+        except Exception:
+            messagebox.showerror("Invalid time", "Time must be in HH:MM 24-hour format.")
+            return
+
+        # 2. Global Capacity Check (NEW)
+        checkin_iso = checkin_dt.isoformat(sep=' ')
+        checkout_iso = checkout_dt.isoformat(sep=' ')
+        
+        # Verify capacity availability before proceeding
+        try:
+            is_avail, max_cap, current_load = ResortModel.check_capacity_availability(
+                checkin_iso, checkout_iso, num_guests
+            )
+            if not is_avail:
+                messagebox.showerror(
+                    "Capacity Reached", 
+                    f"Cannot check-in. Resort capacity limit ({max_cap}) reached.\n"
+                    f"Current Guests: {current_load}"
+                )
+                return
+        except Exception as e:
+             messagebox.showerror("Model Error", f"Error checking capacity: {e}")
+             return
+
+        # 3. Select Room (Must be available NOW)
+        available_rooms = RoomModel.get_available_rooms(checkin_iso, checkout_iso)
+        
+        suitable_rooms = [r for r in available_rooms if r['room_capacity'] >= num_guests]
+        
+        if not suitable_rooms:
+            messagebox.showerror("No Room", "No suitable room available now for the dates/guests specified.")
+            return
+
+        room_list_str = "\n".join([f"{r['room_id']} - {r['room_number']} (Cap: {r['room_capacity']})" for r in suitable_rooms])
+        room_choice = simpledialog.askstring("Room Selection", f"Enter Room ID. Options:\n" + room_list_str, parent=self.app)
+        
+        if not room_choice:
+            return
+            
+        try:
+            room_id = int(room_choice)
+            selected_room = next(r for r in suitable_rooms if r['room_id'] == room_id)
+            room_number = selected_room['room_number']
+        except Exception:
+            messagebox.showerror("Invalid choice", "Provide a valid Room ID number from the list.")
+            return
+            
+        # 4. Select Service (Required for same-day check-in)
+        services = query("SELECT service_id, service_name, base_price FROM service WHERE service_name LIKE '%Room%' OR service_name LIKE '%Cottage%'", fetchall=True) or []
+        if not services:
+            messagebox.showerror("No services", "No room services found in DB.")
+            return
+            
+        svc_names = [f"{s['service_id']} - {s['service_name']} (₱{s['base_price']})" for s in services]
+        svc_choice = simpledialog.askstring("Room Service", f"Pick the primary service (e.g., Room Standard) by ID. Options:\n" + "\n".join(svc_names), parent=self.app)
+        
+        if not svc_choice:
+            return
+            
+        try:
+            svc_id = int(svc_choice.split()[0])
+            svc_row = next(s for s in services if s['service_id'] == svc_id)
+            price = svc_row['base_price']
+        except Exception:
+            messagebox.showerror("Invalid choice", "Provide a service id number from the list.")
+            return
+        
+        # 5. Finalize Transaction
         try:
             conn = get_conn()
             cur = conn.cursor()
             created_at = datetime.now().isoformat(sep=' ', timespec='seconds')
             
+            # Create Reservation
             cur.execute(
-                "INSERT INTO reservation (customer_id, check_in_date, check_out_date, num_guests, status, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (self.app.current_customer['customer_id'], checkin_dt.isoformat(sep=' '), checkout_dt.isoformat(sep=' '), num_guests, 'Checked-in', f"Mode:{mode_choice}", created_at)
+                "INSERT INTO reservation (customer_id, room_id, check_in_date, check_out_date, num_guests, status, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (self.app.current_customer['customer_id'], room_id, checkin_iso, checkout_iso, num_guests, 'Checked-in', 'Instant Check-in', created_at)
             )
             reservation_id = cur.lastrowid
             
-            svc_row = None
-            for s in services:
-                if s['service_id'] == svc_id:
-                    svc_row = s
-                    break
-            price = svc_row['base_price'] if svc_row else 0.0
+            # Update room status to 'occupied'
+            RoomModel.set_room_status(room_id, 'occupied') 
             
+            # Save Service
             cur.execute(
                 "INSERT INTO reservation_services (reservation_id, service_id, quantity, service_price) VALUES (?, ?, ?, ?)",
                 (reservation_id, svc_id, 1, price)
             )
             
+            # Save Billing (Status Unpaid, clerk collects payment via separate process or immediately after)
             cur.execute(
-                "INSERT INTO billing (reservation_id, final_amount, status, created_at) VALUES (?, ?, ?, ?)",
-                (reservation_id, price, 'Paid', created_at)
+                "INSERT INTO billing (reservation_id, final_amount, service_charges, initial_deposit, amount_paid, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (reservation_id, price, price, 0.0, 0.0, 'Unpaid', created_at)
             )
             billing_id = cur.lastrowid
+            
             conn.commit()
             conn.close()
             
-            messagebox.showinfo("Checked-in", f"Checked in successfully. Reservation ID: {reservation_id}")
+            messagebox.showinfo("Checked-in", f"Checked in successfully to Room {room_number}.\nReservation ID: {reservation_id}\nBill Created (Unpaid).")
             
             # Navigate back
             self.app.admin_dashboard.show_admin_customer_dashboard()
             
         except Exception as e:
-            messagebox.showerror("DB Error", f"Failed to save check-in: {e}")
+            messagebox.showerror("DB Error", f"Failed to save instant check-in: {e}")

@@ -37,12 +37,13 @@ else:
         status TEXT
     )''')
 
-    # reservation table
+    # reservation table (ADDED room_id and check_out_date_actual)
     cur.execute('''CREATE TABLE reservation (
         reservation_id INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_id INTEGER,
         check_in_date TEXT,
         check_out_date TEXT,
+        check_out_date_actual TEXT, 
         num_guests INTEGER,
         status TEXT,
         notes TEXT,
@@ -81,11 +82,14 @@ else:
         FOREIGN KEY(customer_id) REFERENCES customer(customer_id)
     )''')
 
-    # billing table
+    # billing table (ADDED initial_deposit, service_charges, amount_paid)
     cur.execute('''CREATE TABLE billing (
         billing_id INTEGER PRIMARY KEY AUTOINCREMENT,
         reservation_id INTEGER,
+        initial_deposit REAL DEFAULT 0.0, 
+        service_charges REAL DEFAULT 0.0, 
         final_amount REAL,
+        amount_paid REAL DEFAULT 0.0,
         status TEXT,
         created_at TEXT,
         FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id)
@@ -129,7 +133,7 @@ else:
     cur.executemany('INSERT INTO service (service_name, description, base_price) VALUES (?, ?, ?)', services)
 
     # Seed resort capacity
-    cur.execute('INSERT INTO resort_info (max_capacity) VALUES (?)', (50,))  # Example: max 50 guests
+    cur.execute('INSERT INTO resort_info (max_capacity) VALUES (?)', (100,))
 
     # Seed rooms
     rooms = [

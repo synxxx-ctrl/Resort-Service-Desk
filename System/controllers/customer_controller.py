@@ -3,15 +3,7 @@ from tkinter import messagebox, simpledialog
 import re
 from db import get_conn, query
 from models import CustomerModel
-
-# --- Helper Functions (ensure these exist) ---
-def is_valid_email(email):
-    # Simple regex for email validation
-    return re.match(r"[^@]+@[^@]+\.[^@]+", email)
-
-def is_valid_phone(phone):
-    # Simple check for length/digits
-    return phone.isdigit() and len(phone) >= 7
+from utils import is_valid_email, is_valid_phone, generate_unique_customer_code # IMPORTED UTILS FUNCTIONS
 
 class CustomerController:
     def __init__(self, app):
@@ -69,11 +61,14 @@ class CustomerController:
 
             # Database Insert
             try:
+                # --- FIX: Generate unique customer code (username) ---
+                customer_code = generate_unique_customer_code()
+                
                 conn = get_conn()
                 cur = conn.cursor()
                 cur.execute(
-                    "INSERT INTO customer (full_name, email, contact_number) VALUES (?, ?, ?)",
-                    (name, email, contact)
+                    "INSERT INTO customer (username, full_name, email, contact_number) VALUES (?, ?, ?, ?)",
+                    (customer_code, name, email, contact) # ADDED customer_code
                 )
                 customer_id = cur.lastrowid
                 conn.commit()
@@ -108,14 +103,15 @@ class CustomerController:
 
     def customer_lookup_admin(self):
         # Dialog parent is self.app
-        name = simpledialog.askstring("Customer Lookup", "Enter customer name:", parent=self.app)
+        name = simpledialog.askstring("Customer Lookup", "Enter customer name or code:", parent=self.app)
         if not name:
             return
         
-        row = query("SELECT * FROM customer WHERE full_name LIKE ? LIMIT 1", ('%' + name + '%',), fetchone=True)
+        # Search by full_name or username (customer code)
+        row = query("SELECT * FROM customer WHERE full_name LIKE ? OR username = ? LIMIT 1", ('%' + name + '%', name), fetchone=True)
         
         if not row:
-            messagebox.showerror("Not Found", "No customer found with that name.")
+            messagebox.showerror("Not Found", "No customer found with that name or code.")
             return
         
         # Update Main App State
@@ -131,6 +127,7 @@ class CustomerController:
             return
         
         info = (
+            f"Code: {self.app.current_customer['username']}\n"
             f"Name: {self.app.current_customer['full_name']}\n"
             f"Email: {self.app.current_customer['email']}\n"
             f"Contact: {self.app.current_customer['contact_number']}"
