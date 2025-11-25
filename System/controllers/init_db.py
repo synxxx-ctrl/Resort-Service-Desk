@@ -3,7 +3,7 @@ import os
 
 # --- IMPORTANT: DELETE OLD DB FILE BEFORE RUNNING THIS TO RESET DATA ---
 if os.path.exists('resort.db'):
-    print('resort.db already exists - skipping creation. Delete the file to recreate with new RESTAURANT MENU.')
+    print('resort.db already exists - skipping creation. Delete the file to recreate with new schema.')
 else:
     conn = get_conn()
     cur = conn.cursor()
@@ -36,6 +36,7 @@ else:
         type TEXT 
     )''')
 
+    # MODIFIED: Added guest breakdown columns
     cur.execute('''CREATE TABLE reservation (
         reservation_id INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_id INTEGER,
@@ -43,6 +44,10 @@ else:
         check_out_date TEXT,
         check_out_date_actual TEXT, 
         num_guests INTEGER,
+        count_adults INTEGER DEFAULT 0,
+        count_kids INTEGER DEFAULT 0,
+        count_pwd INTEGER DEFAULT 0,
+        count_seniors INTEGER DEFAULT 0,
         status TEXT,
         notes TEXT,
         created_at TEXT,
@@ -77,11 +82,13 @@ else:
         FOREIGN KEY(customer_id) REFERENCES customer(customer_id)
     )''')
 
+    # MODIFIED: Added discount_amount
     cur.execute('''CREATE TABLE billing (
         billing_id INTEGER PRIMARY KEY AUTOINCREMENT,
         reservation_id INTEGER,
         initial_deposit REAL DEFAULT 0.0, 
         service_charges REAL DEFAULT 0.0, 
+        discount_amount REAL DEFAULT 0.0,
         final_amount REAL,
         amount_paid REAL DEFAULT 0.0,
         status TEXT,
@@ -109,26 +116,19 @@ else:
         FOREIGN KEY(billing_id) REFERENCES billing(billing_id)
     )''')
 
-    # 2. Seed Admin
+    # 2. Seed Data
     cur.execute('INSERT INTO admin (username, password) VALUES (?, ?)', ('admin', 'admin'))
 
-    # 3. Seed Services (UPDATED WITH RESTAURANT CHOICES)
     services = [
-        # Accommodation Fees
         ('Room Fee - Single (1 Pax)', 'Standard single room per night', 1500.0),
         ('Room Fee - Double (2 Pax)', 'Standard double room per night', 2500.0),
         ('Room Fee - Family (4 Pax)', 'Family room per night', 4500.0),
         ('Room Fee - Suite (6 Pax)', 'Luxury suite per night', 7000.0),
         ('Cottage Rental (10 Pax)', 'Large group cottage rental', 10000.0),
-        
-        # --- NEW RESTAURANT MENU ---
         ('Meal: Solo (1 Pax)', 'Set meal for 1 person', 350.0),
         ('Meal: Couple (2 Pax)', 'Set meal for 2 people', 600.0),
         ('Meal: Family (4-6 Pax)', 'Bundle for 4-6 people', 1500.0),
         ('Meal: Feast (6-10 Pax)', 'Bundle for 6-10 people', 2800.0),
-        # ---------------------------
-
-        # Amenities / Extras
         ('Pool Access', 'Pool day pass per pax', 250.0),
         ('Spa Session', '60-min spa per pax', 800.0),
         ('Banana Boat', 'Per ride per group', 1500.0),
@@ -137,44 +137,31 @@ else:
     ]
     cur.executemany('INSERT INTO service (service_name, description, base_price) VALUES (?, ?, ?)', services)
 
-    # 4. Seed Resort Info (Max Capacity = 100)
     cur.execute('INSERT INTO resort_info (max_capacity) VALUES (?)', (100,))
 
-    # 5. Seed Rooms & Cottages (Exact 100 Pax Configuration)
     rooms_data = []
-
-    # A. Single Rooms (2 rooms, 1 pax) -> Total 2 pax
     rooms_data.append(('Single 101', 1, 'available', 'Room'))
     rooms_data.append(('Single 102', 1, 'available', 'Room'))
-
-    # B. Double Rooms (4 rooms, 2 pax) -> Total 8 pax
     rooms_data.append(('Double 201', 2, 'available', 'Room'))
     rooms_data.append(('Double 202', 2, 'available', 'Room'))
     rooms_data.append(('Double 203', 2, 'available', 'Room'))
     rooms_data.append(('Double 204', 2, 'available', 'Room'))
-
-    # C. Family Rooms (4 rooms, 4 pax) -> Total 16 pax
     rooms_data.append(('Family 301', 4, 'available', 'Room'))
     rooms_data.append(('Family 302', 4, 'available', 'Room'))
     rooms_data.append(('Family 303', 4, 'available', 'Room'))
     rooms_data.append(('Family 304', 4, 'available', 'Room'))
-
-    # D. Suites/Villas (4 rooms, 6 pax) -> Total 24 pax
     rooms_data.append(('Suite 401', 6, 'available', 'Room'))
     rooms_data.append(('Suite 402', 6, 'available', 'Room'))
     rooms_data.append(('Suite 403', 6, 'available', 'Room'))
     rooms_data.append(('Suite 404', 6, 'available', 'Room'))
-
-    # E. Cottages (5 cottages, 10 pax each) -> Total 50 pax
     rooms_data.append(('Cottage 01', 10, 'available', 'Cottage'))
     rooms_data.append(('Cottage 02', 10, 'available', 'Cottage'))
     rooms_data.append(('Cottage 03', 10, 'available', 'Cottage'))
     rooms_data.append(('Cottage 04', 10, 'available', 'Cottage'))
     rooms_data.append(('Cottage 05', 10, 'available', 'Cottage'))
 
-    # Insert into DB
     cur.executemany('INSERT INTO room (room_number, room_capacity, status, type) VALUES (?, ?, ?, ?)', rooms_data)
 
     conn.commit()
     conn.close()
-    print('resort.db created with expanded Restaurant Menu.')
+    print('resort.db created.')
