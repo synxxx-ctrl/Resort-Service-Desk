@@ -10,33 +10,25 @@ class WindowManager:
         self.app = app
 
     def show_main_menu(self):
-        """Displays the main user-facing menu or initial screen."""
-        self.app.geometry("1100x700")  # Set back to large size
+        """
+        UPDATED: Initializes the window and immediately redirects to Admin Login.
+        """
+        self.app.geometry("1100x700")
         
         # --- SAFE SCREEN CLEARING ---
-        # 1. Destroy all current widgets (including old containers)
+        # 1. Destroy all current widgets (clean slate)
         for widget in self.app.winfo_children():
             widget.destroy()
         
-        # 2. Re-create the container so we have a place to put the new buttons
-        # We attach the container to the main app instance
+        # 2. Re-create the container (Required for the login screen to have a place to sit)
         self.app.container = ctk.CTkFrame(self.app)
         self.app.container.pack(fill="both", expand=True)
         # ----------------------------
         
-        # Main Menu Content
-        ctk.CTkLabel(self.app.container, text="Welcome to the Main Menu", font=("Helvetica", 30)).pack(pady=50)
-        
-        # Updated Button: "Admin Login"
-        # Calls the AuthController instance located in the main app
-        ctk.CTkButton(
-            self.app.container, 
-            text="Admin Login", 
-            command=self.app.auth_controller.open_admin_login
-        ).pack(pady=10)
-        
-        # Reset admin mode flag on the main app
+        # Reset admin mode flag
         self.app.is_admin_mode = False
+        # Redirect to Admin Login
+        self.app.auth_controller.open_admin_login()
 
     def show_customer_dashboard(self):
         self.clear_container()
@@ -44,7 +36,8 @@ class WindowManager:
         # Access current_customer from the main app state
         if not hasattr(self.app, 'current_customer') or not self.app.current_customer:
             ctk.CTkLabel(self.app.container, text="Error: No customer selected.", font=("Helvetica", 18)).pack(pady=50)
-            ctk.CTkButton(self.app.container, text="Back to Main Menu", command=self.show_main_menu).pack(pady=10)
+            # If error, go back to main menu (which now redirects to login)
+            ctk.CTkButton(self.app.container, text="Back to Login", command=self.show_main_menu).pack(pady=10)
             return
 
         frame = ctk.CTkFrame(self.app.container, corner_radius=8)
@@ -69,14 +62,12 @@ class WindowManager:
         # Action Buttons
         ctk.CTkLabel(frame, text="Actions", font=("Helvetica", 18)).pack(pady=10)
         
-        # Links now correctly point to methods in MainApp
         ctk.CTkButton(frame, text="View Reservations", command=self.app.show_customer_reservations).pack(pady=10)
         ctk.CTkButton(frame, text="View Services and Billing", command=self.app.show_customer_services).pack(pady=10)
         ctk.CTkButton(frame, text="View Payments / Receipts", command=self.app.payment_controller.show_receipts).pack(pady=10)
         
-        # Back button to Admin/Main Menu
+        # Back button handling
         if hasattr(self.app, 'is_admin_mode') and self.app.is_admin_mode:
-            # Calls AdminDashboard to go to Admin Customer Dashboard for continuity
             ctk.CTkButton(frame, text="Back to Admin Customer Lookup", command=self.app.admin_dashboard.show_admin_customer_dashboard).pack(pady=30)
         else:
             ctk.CTkButton(frame, text="Logout", command=self.show_main_menu).pack(pady=30)
@@ -88,7 +79,6 @@ class WindowManager:
                 widget.destroy()
 
     def focus_or_create_window(self, key, create_fn):
-        # Initialize open_windows dict in app if not present
         if not hasattr(self.app, 'open_windows'):
             self.app.open_windows = {}
 

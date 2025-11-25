@@ -22,7 +22,7 @@ class AuthController:
         # --- CREATE SMALL LOGIN WINDOW ---
         # Pass self.app as the master/parent
         login_win = ctk.CTkToplevel(self.app)
-        login_win.title("Admin Login")
+        login_win.title("Resort Service Desk")
         login_win.geometry("320x260")
         login_win.resizable(False, False)
         login_win.grab_set()   # Prevent clicking anywhere else
