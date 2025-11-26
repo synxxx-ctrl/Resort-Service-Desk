@@ -1,5 +1,4 @@
 import customtkinter as ctk
-
 # --- Import all your controllers ---
 from auth_controller import AuthController
 from window_manager import WindowManager
