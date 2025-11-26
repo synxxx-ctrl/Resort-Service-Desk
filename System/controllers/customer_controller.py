@@ -91,20 +91,19 @@ class CustomerController:
         btn_back.pack(pady=5)
 
     def customer_lookup_admin(self):
-        # --- NEW: Small Window for Lookup ---
         search_win = ctk.CTkToplevel(self.app)
         search_win.title("Customer Lookup")
-        search_win.geometry("400x500")
-        search_win.transient(self.app) # Keep on top of main app
-        search_win.grab_set() # Modal behavior
+        search_win.geometry("450x550")
+        search_win.transient(self.app) 
+        search_win.grab_set() 
 
-        ctk.CTkLabel(search_win, text="Find Customer", font=("Arial", 20, "bold")).pack(pady=15)
+        ctk.CTkLabel(search_win, text="Select Customer", font=("Arial", 20, "bold")).pack(pady=15)
         
         # Search Bar Area
         search_frame = ctk.CTkFrame(search_win, fg_color="transparent")
         search_frame.pack(fill='x', padx=20, pady=5)
         
-        entry_search = ctk.CTkEntry(search_frame, placeholder_text="Name or Customer Code", height=35)
+        entry_search = ctk.CTkEntry(search_frame, placeholder_text="Search Name or Code...", height=35)
         entry_search.pack(side='left', fill='x', expand=True, padx=(0, 10))
         
         # Results Area
@@ -112,25 +111,23 @@ class CustomerController:
         results_frame.pack(fill='both', expand=True, padx=20, pady=10)
 
         def perform_search(event=None):
-            # Clear previous
             for widget in results_frame.winfo_children(): widget.destroy()
             
             term = entry_search.get().strip()
-            if not term: return
-
-            # Find matching customers
-            rows = query("SELECT * FROM customer WHERE full_name LIKE ? OR username LIKE ?", 
-                         (f'%{term}%', f'%{term}%'), fetchall=True)
+            
+            if term:
+                rows = query("SELECT * FROM customer WHERE full_name LIKE ? OR username LIKE ?", 
+                             (f'%{term}%', f'%{term}%'), fetchall=True)
+            else:
+                rows = query("SELECT * FROM customer ORDER BY customer_id DESC", fetchall=True)
             
             if not rows:
-                ctk.CTkLabel(results_frame, text="No matches found.", text_color="gray").pack(pady=20)
+                ctk.CTkLabel(results_frame, text="No customers found.", text_color="gray").pack(pady=20)
                 return
                 
             for r in rows:
-                # Create a card/button for each match
                 btn_text = f"{r['full_name']}\nID: {r['username']} | 📞 {r['contact_number']}"
                 
-                # Using a Button that looks like a card
                 btn = ctk.CTkButton(
                     results_frame, 
                     text=btn_text, 
@@ -151,23 +148,59 @@ class CustomerController:
             search_win.destroy() # Close lookup window
             self.app.admin_dashboard.show_admin_customer_dashboard()
 
-        # Search Button
         ctk.CTkButton(search_frame, text="Search", width=80, height=35, command=perform_search).pack(side='right')
         
-        # Allow pressing 'Enter' to search
         entry_search.bind("<Return>", perform_search)
+        
+        # Initial Load
+        perform_search()
         entry_search.focus()
 
     def show_current_customer_info(self):
         if not hasattr(self.app, 'current_customer') or not self.app.current_customer:
-            messagebox.showerror("Error", "No customer loaded.")
+            messagebox.showerror("Error", "No customer loaded.", parent=self.app)
             return
         
-        info = (
-            f"Code: {self.app.current_customer['username']}\n"
-            f"Name: {self.app.current_customer['full_name']}\n"
-            f"Email: {self.app.current_customer['email']}\n"
-            f"Contact: {self.app.current_customer['contact_number']}"
-        )
+        cust = self.app.current_customer
+
+        # --- Modern Profile Window ---
+        info_win = ctk.CTkToplevel(self.app)
+        info_win.title("Customer Profile")
+        # --- FIX: Increased Height to 500 to fit the Close button ---
+        info_win.geometry("400x500")
+        info_win.transient(self.app)
+        info_win.grab_set()
+
+        # Main Container
+        main = ctk.CTkFrame(info_win, fg_color="transparent")
+        main.pack(expand=True, fill="both", padx=20, pady=20)
+
+        # 1. Avatar / Header
+        ctk.CTkLabel(main, text="👤", font=("Arial", 60)).pack(pady=(10, 5))
         
-        self.app.window_manager.open_text_window("Customer Info", info)
+        ctk.CTkLabel(main, text=cust['full_name'], font=("Arial", 22, "bold")).pack()
+        ctk.CTkLabel(main, text=f"Customer ID: {cust['username']}", font=("Arial", 14), text_color="gray").pack(pady=(0, 15))
+
+        # Divider
+        ctk.CTkFrame(main, height=2, fg_color="gray60").pack(fill="x", padx=40, pady=10)
+
+        # 2. Details Card
+        details_card = ctk.CTkFrame(main, corner_radius=10, fg_color=("gray90", "gray20"))
+        details_card.pack(fill="x", padx=10, pady=10)
+
+        details_card.columnconfigure(0, weight=1)
+        details_card.columnconfigure(1, weight=2)
+
+        # Email
+        ctk.CTkLabel(details_card, text="Email:", font=("Arial", 14, "bold"), anchor="e").grid(row=0, column=0, padx=10, pady=15, sticky="e")
+        ctk.CTkLabel(details_card, text=cust['email'], font=("Arial", 14), anchor="w").grid(row=0, column=1, padx=10, pady=15, sticky="w")
+
+        # Separator line inside card
+        ctk.CTkFrame(details_card, height=1, fg_color="gray70").grid(row=1, column=0, columnspan=2, sticky="ew", padx=10)
+
+        # Phone
+        ctk.CTkLabel(details_card, text="Phone:", font=("Arial", 14, "bold"), anchor="e").grid(row=2, column=0, padx=10, pady=15, sticky="e")
+        ctk.CTkLabel(details_card, text=cust['contact_number'], font=("Arial", 14), anchor="w").grid(row=2, column=1, padx=10, pady=15, sticky="w")
+
+        # 3. Actions (Just Close)
+        ctk.CTkButton(main, text="Close", command=info_win.destroy, fg_color="#c0392b", hover_color="#e74c3c", width=140).pack(pady=30)
