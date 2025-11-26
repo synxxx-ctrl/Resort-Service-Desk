@@ -1,87 +1,110 @@
-Resort Service Desk System 
+# 🏝️ Resort Service Desk System
 
-A Python-based desktop application for managing resort operations, including reservations, check-ins, billing, maintenance tracking, and reports. This project was built using customtkinter for the GUI and sqlite3 for data management.
+A **Python-based desktop application** for managing resort operations
+such as reservations, check-ins, billing, maintenance tracking, and
+financial reporting.\
+Built with **customtkinter** for a modern GUI and **SQLite3** for
+lightweight, reliable data storage.
 
-Features:
+## 🚀 Features
 
-Admin Dashboard: Central hub for managing all resort activities.
+### 🛠️ Admin Dashboard
 
-Reservation Management: Create bookings for overnight stays or day tours.
+Central hub to access all system functionalities.
 
-Check-in / Check-out: Manage guest stays and calculate bills automatically.
+### 🏨 Reservation Management
 
-Billing & Payments: Process payments and view transaction history.
+-   Create bookings for **overnight stays** or **day tours**.
+-   View and manage upcoming, ongoing, and completed reservations.
 
-Maintenance Tracking: Report broken amenities, handle swaps, and process refunds.
+### 🧳 Check-in / Check-out
 
-Customer Management: Register new guests and view customer history.
+-   Track guest stays.
+-   Automatic bill calculations on checkout.
 
-Reports: Generate daily, weekly, monthly, or custom date range financial reports.
+### 💳 Billing & Payments
 
-Tech Stack:
+-   Compute fees dynamically.
+-   Process payments and store transaction history.
 
-Language: Python 3.x
+### 🧹 Maintenance Tracking
 
-GUI: customtkinter (Modern Tkinter wrapper)
+-   Report broken amenities.
+-   Handle item swaps and apply refunds when necessary.
 
-Database: SQLite 3
+### 👤 Customer Management
 
-Libraries: tkcalendar (for date picking), tkinter (standard library)
+-   Register new guests.
+-   View complete customer history and past reservations.
 
-Setup & Installation:
+### 📊 Reports
 
-Clone the repository (or download the files):
+Generate: - Daily reports - Weekly reports - Monthly reports - Custom
+date range financial summaries
 
-git clone [https://github.com/your-username/resort-service-desk.git](https://github.com/your-username/resort-service-desk.git)
-cd resort-service-desk
+## 🛠️ Tech Stack
 
+-   **Language:** Python 3.x
+-   **GUI Framework:** customtkinter (modern Tkinter wrapper)
+-   **Database:** SQLite3
+-   **Libraries:**
+    -   tkcalendar -- date selection components
+    -   tkinter -- standard GUI library
 
-Install dependencies:
-Make sure you have Python installed. Then run:
+## 📥 Setup & Installation
 
-pip install customtkinter tkcalendar
+### 1. Clone the Repository
 
+    git clone https://github.com/your-username/resort-service-desk.git
+    cd resort-service-desk
 
-Initialize the Database:
+### 2. Install Dependencies
 
-Important: If you have an existing resort.db, delete it first to ensure the schema is updated.
+Make sure Python 3.x is installed.
+
+    pip install customtkinter tkcalendar
+
+### 3. Initialize the Database
+
+⚠️ Important: If an existing resort.db is present, delete it to avoid
+schema conflicts.
 
 Run the initialization script:
 
-python init_db.py
+    python init_db.py
 
+This will generate a new resort.db with all required tables and a
+default admin account.
 
-This will create a fresh resort.db file with the necessary tables and default admin account.
+### 4. Run the Application
 
-Run the Application:
+    python MainApp.py
 
-python MainApp.py
+## 🔑 Default Credentials
 
+-   Username: admin
+-   Password: admin
 
-Default Credentials:
+## 📂 Project Structure
 
-Username: admin
+    resort-service-desk/
+    │
+    ├── MainApp.py               # Entry point of the application
+    ├── admin_dashboard.py       # Admin main menu UI
+    │
+    ├── controllers/             # Core logic (reservations, payments, maintenance)
+    │
+    ├── models.py                # Database queries and data handling
+    ├── db.py                    # Database connection helper
+    ├── init_db.py               # Database creation & setup script
+    │
+    └── README.md                # Project documentation
 
-Password: admin
+## 📝 Notes
 
-Project Structure 📂
-
-MainApp.py: Entry point of the application.
-
-admin_dashboard.py: Main menu UI for administrators.
-
-controllers/: Contains logic for reservations, payments, maintenance, etc.
-
-models.py: Database queries and data handling logic.
-
-db.py: Database connection handler.
-
-init_db.py: Script to set up the database schema.
-
-Notes 📝
-
-This project is a work in progress for a college requirement.
-
-Ensure tkcalendar is installed for the date picker to work correctly; otherwise, it falls back to a text entry field.
-
-Created by ALCARAZ, Tristan and MERCADO, Marc Ivan - BSIT 2106
+-   This project is currently a work in progress for a college
+    requirement.
+-   Ensure tkcalendar is installed; otherwise, the date fields will use
+    a text entry fallback.
+-   Built and maintained by: **ALCARAZ, Tristan** & **MERCADO, Marc
+    Ivan** -- BSIT 2106
