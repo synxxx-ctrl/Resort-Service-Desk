@@ -1,9 +1,9 @@
 import customtkinter as ctk
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox
 import re
 from db import get_conn, query
 from models import CustomerModel
-from utils import is_valid_email, is_valid_phone, generate_unique_customer_code # IMPORTED UTILS FUNCTIONS
+from utils import is_valid_email, is_valid_phone, generate_unique_customer_code
 
 class CustomerController:
     def __init__(self, app):
@@ -14,11 +14,9 @@ class CustomerController:
         self.app = app
 
     def customer_register(self):
-        # --- FIX 1: Use window_manager to clear.
         self.app.window_manager.clear_container()
         
         # 1. UI Setup
-        # NOTE: All widgets must be parented to self.app.container
         ctk.CTkLabel(self.app.container, text="Customer Registration", font=("Arial", 24, "bold")).pack(pady=30)
 
         # Form Frame
@@ -46,7 +44,6 @@ class CustomerController:
             email = entry_email.get().strip()
             contact = entry_contact.get().strip()
 
-            # Basic Validation
             if not name or not email or not contact:
                 messagebox.showerror("Error", "All fields are required.")
                 return
@@ -59,39 +56,31 @@ class CustomerController:
                 messagebox.showerror("Invalid Number", "Please enter a valid phone number.")
                 return
 
-            # Database Insert
             try:
-                # --- FIX: Generate unique customer code (username) ---
                 customer_code = generate_unique_customer_code()
                 
                 conn = get_conn()
                 cur = conn.cursor()
                 cur.execute(
                     "INSERT INTO customer (username, full_name, email, contact_number) VALUES (?, ?, ?, ?)",
-                    (customer_code, name, email, contact) # ADDED customer_code
+                    (customer_code, name, email, contact)
                 )
                 customer_id = cur.lastrowid
                 conn.commit()
                 conn.close()
 
-                # Set current customer in the MAIN APP state
                 self.app.current_customer = CustomerModel.get_customer_by_id(customer_id)
                 self.app.cart = []
 
-                # Go to Admin Customer Dashboard
-                # Ensure AdminDashboard is initialized in main app as self.app.admin_dashboard
                 self.app.admin_dashboard.show_admin_customer_dashboard()
 
             except Exception as e:
                 messagebox.showerror("Database Error", f"An error occurred: {e}")
 
         # 3. Buttons
-        # NOTE: Attached to self.app.container
         btn_submit = ctk.CTkButton(self.app.container, text="Register & Continue", command=submit_form, fg_color="green")
         btn_submit.pack(pady=20)
 
-        # Back Button
-        # NOTE: Routes back to Admin Interface
         btn_back = ctk.CTkButton(
             self.app.container, 
             text="Cancel", 
@@ -102,24 +91,72 @@ class CustomerController:
         btn_back.pack(pady=5)
 
     def customer_lookup_admin(self):
-        # Dialog parent is self.app
-        name = simpledialog.askstring("Customer Lookup", "Enter customer name or code:", parent=self.app)
-        if not name:
-            return
+        # --- NEW: Small Window for Lookup ---
+        search_win = ctk.CTkToplevel(self.app)
+        search_win.title("Customer Lookup")
+        search_win.geometry("400x500")
+        search_win.transient(self.app) # Keep on top of main app
+        search_win.grab_set() # Modal behavior
+
+        ctk.CTkLabel(search_win, text="Find Customer", font=("Arial", 20, "bold")).pack(pady=15)
         
-        # Search by full_name or username (customer code)
-        row = query("SELECT * FROM customer WHERE full_name LIKE ? OR username = ? LIMIT 1", ('%' + name + '%', name), fetchone=True)
+        # Search Bar Area
+        search_frame = ctk.CTkFrame(search_win, fg_color="transparent")
+        search_frame.pack(fill='x', padx=20, pady=5)
         
-        if not row:
-            messagebox.showerror("Not Found", "No customer found with that name or code.")
-            return
+        entry_search = ctk.CTkEntry(search_frame, placeholder_text="Name or Customer Code", height=35)
+        entry_search.pack(side='left', fill='x', expand=True, padx=(0, 10))
         
-        # Update Main App State
-        self.app.current_customer = row
-        self.app.cart = []
+        # Results Area
+        results_frame = ctk.CTkScrollableFrame(search_win)
+        results_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        def perform_search(event=None):
+            # Clear previous
+            for widget in results_frame.winfo_children(): widget.destroy()
+            
+            term = entry_search.get().strip()
+            if not term: return
+
+            # Find matching customers
+            rows = query("SELECT * FROM customer WHERE full_name LIKE ? OR username LIKE ?", 
+                         (f'%{term}%', f'%{term}%'), fetchall=True)
+            
+            if not rows:
+                ctk.CTkLabel(results_frame, text="No matches found.", text_color="gray").pack(pady=20)
+                return
+                
+            for r in rows:
+                # Create a card/button for each match
+                btn_text = f"{r['full_name']}\nID: {r['username']} | 📞 {r['contact_number']}"
+                
+                # Using a Button that looks like a card
+                btn = ctk.CTkButton(
+                    results_frame, 
+                    text=btn_text, 
+                    font=("Arial", 14), 
+                    height=60,
+                    fg_color="transparent", 
+                    border_width=1, 
+                    border_color="gray",
+                    text_color=("black", "white"),
+                    anchor="w",
+                    command=lambda cust=r: select_customer(cust)
+                )
+                btn.pack(fill='x', pady=5)
+
+        def select_customer(row):
+            self.app.current_customer = row
+            self.app.cart = [] # Reset cart
+            search_win.destroy() # Close lookup window
+            self.app.admin_dashboard.show_admin_customer_dashboard()
+
+        # Search Button
+        ctk.CTkButton(search_frame, text="Search", width=80, height=35, command=perform_search).pack(side='right')
         
-        # Route to Dashboard
-        self.app.admin_dashboard.show_admin_customer_dashboard()
+        # Allow pressing 'Enter' to search
+        entry_search.bind("<Return>", perform_search)
+        entry_search.focus()
 
     def show_current_customer_info(self):
         if not hasattr(self.app, 'current_customer') or not self.app.current_customer:
@@ -133,5 +170,4 @@ class CustomerController:
             f"Contact: {self.app.current_customer['contact_number']}"
         )
         
-        # Use WindowManager to show text
         self.app.window_manager.open_text_window("Customer Info", info)
