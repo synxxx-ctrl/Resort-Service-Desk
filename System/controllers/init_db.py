@@ -2,7 +2,7 @@ from db import execute, get_conn
 import os
 
 if os.path.exists('resort.db'):
-    print('resort.db already exists - skipping creation. Delete the file to recreate with Cashier Name support.')
+    print('resort.db already exists - skipping creation. Delete the file to recreate with Stock Limits.')
 else:
     conn = get_conn()
     cur = conn.cursor()
@@ -21,42 +21,52 @@ else:
         FOREIGN KEY(customer_id) REFERENCES customer(customer_id), FOREIGN KEY(room_id) REFERENCES room(room_id)
     )''')
 
-    cur.execute('''CREATE TABLE service (service_id INTEGER PRIMARY KEY AUTOINCREMENT, service_name TEXT, description TEXT, base_price REAL)''')
+    # MODIFIED: Added stock_total
+    cur.execute('''CREATE TABLE service (
+        service_id INTEGER PRIMARY KEY AUTOINCREMENT, service_name TEXT, description TEXT, base_price REAL, stock_total INTEGER DEFAULT 999
+    )''')
+
     cur.execute('''CREATE TABLE reservation_services (id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_id INTEGER, service_id INTEGER, quantity INTEGER, service_price REAL, FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id), FOREIGN KEY(service_id) REFERENCES service(service_id))''')
     cur.execute('''CREATE TABLE waitlist (waitlist_id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, requested_service TEXT, timestamp TEXT, FOREIGN KEY(customer_id) REFERENCES customer(customer_id))''')
     
-    # MODIFIED: Added cashier_name
     cur.execute('''CREATE TABLE billing (
         billing_id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_id INTEGER, initial_deposit REAL DEFAULT 0.0, 
-        service_charges REAL DEFAULT 0.0, discount_amount REAL DEFAULT 0.0, final_amount REAL, amount_paid REAL DEFAULT 0.0, 
-        status TEXT, cashier_name TEXT DEFAULT 'Admin Cashier', created_at TEXT, 
+        service_charges REAL DEFAULT 0.0, discount_amount REAL DEFAULT 0.0, compensation REAL DEFAULT 0.0,
+        final_amount REAL, amount_paid REAL DEFAULT 0.0, status TEXT, cashier_name TEXT DEFAULT 'Admin Cashier', created_at TEXT, 
         FOREIGN KEY(reservation_id) REFERENCES reservation(reservation_id)
     )''')
 
     cur.execute('''CREATE TABLE payment (payment_id INTEGER PRIMARY KEY AUTOINCREMENT, billing_id INTEGER, customer_id INTEGER, payment_method TEXT, amount REAL, payment_date TEXT, FOREIGN KEY(billing_id) REFERENCES billing(billing_id), FOREIGN KEY(customer_id) REFERENCES customer(customer_id))''')
     cur.execute('''CREATE TABLE receipt (receipt_id INTEGER PRIMARY KEY AUTOINCREMENT, billing_id INTEGER, receipt_no TEXT, issued_at TEXT, content TEXT, FOREIGN KEY(billing_id) REFERENCES billing(billing_id))''')
 
+    cur.execute('''CREATE TABLE maintenance_logs (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT, room_id INTEGER, reported_by_customer_id INTEGER, issue_description TEXT, action_taken TEXT, status TEXT, date_reported TEXT, date_resolved TEXT, FOREIGN KEY(room_id) REFERENCES room(room_id)
+    )''')
+
     # 2. Seed Data
     cur.execute('INSERT INTO admin (username, password) VALUES (?, ?)', ('admin', 'admin'))
 
+    # SEED SERVICES WITH STOCK LIMITS
     services = [
-        ('Room Fee - Single (1 Pax)', 'Standard single room per night', 1500.0),
-        ('Room Fee - Double (2 Pax)', 'Standard double room per night', 2500.0),
-        ('Room Fee - Family (4 Pax)', 'Family room per night', 4500.0),
-        ('Room Fee - Suite (6 Pax)', 'Luxury suite per night', 7000.0),
-        ('Cottage Rental (10 Pax)', 'Large group cottage rental', 10000.0),
-        ('Meal: Solo (1 Pax)', 'Set meal for 1 person', 350.0),
-        ('Meal: Couple (2 Pax)', 'Set meal for 2 people', 600.0),
-        ('Meal: Family (4-6 Pax)', 'Bundle for 4-6 people', 1500.0),
-        ('Meal: Feast (6-10 Pax)', 'Bundle for 6-10 people', 2800.0),
-        ('Karaoke Rental', 'Per hour/session use', 500.0),
-        ('Pool Access', 'Pool day pass per pax', 250.0),
-        ('Spa Session', '60-min spa per pax', 800.0),
-        ('Banana Boat', 'Per ride per group', 1500.0),
-        ('Jetski', 'Per 15-min ride', 2000.0),
-        ('Extra Bed', 'Folding bed with linens', 500.0)
+        ('Room Fee - Single (1 Pax)', 'Standard single room per night', 1500.0, 999),
+        ('Room Fee - Double (2 Pax)', 'Standard double room per night', 2500.0, 999),
+        ('Room Fee - Family (4 Pax)', 'Family room per night', 4500.0, 999),
+        ('Room Fee - Suite (6 Pax)', 'Luxury suite per night', 7000.0, 999),
+        ('Cottage Rental (10 Pax)', 'Large group cottage rental', 10000.0, 999),
+        ('Meal: Solo (1 Pax)', 'Set meal for 1 person', 350.0, 999),
+        ('Meal: Couple (2 Pax)', 'Set meal for 2 people', 600.0, 999),
+        ('Meal: Family (4-6 Pax)', 'Bundle for 4-6 people', 1500.0, 999),
+        ('Meal: Feast (6-10 Pax)', 'Bundle for 6-10 people', 2800.0, 999),
+        
+        # LIMITED STOCK AMENITIES
+        ('Karaoke Rental', 'Per hour/session use', 500.0, 2),
+        ('Pool Access', 'Pool day pass per pax', 250.0, 50),
+        ('Spa Session', '60-min spa per pax', 800.0, 5),
+        ('Banana Boat', 'Per ride per group', 1500.0, 2),
+        ('Jetski', 'Per 15-min ride', 2000.0, 3),
+        ('Extra Bed', 'Folding bed with linens', 500.0, 10)
     ]
-    cur.executemany('INSERT INTO service (service_name, description, base_price) VALUES (?, ?, ?)', services)
+    cur.executemany('INSERT INTO service (service_name, description, base_price, stock_total) VALUES (?, ?, ?, ?)', services)
 
     cur.execute('INSERT INTO resort_info (max_capacity) VALUES (?)', (100,))
 

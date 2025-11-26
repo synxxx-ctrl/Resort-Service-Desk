@@ -23,42 +23,29 @@ class CustomerModel:
     
     @staticmethod
     def calculate_and_create_bill(reservation_id):
-        # 1. Calculate Duration (Nights)
         res = query("SELECT check_in_date, check_out_date FROM reservation WHERE reservation_id=?", (reservation_id,), fetchone=True)
         nights = 1
         if res:
             try:
-                # FIX: Replace 'T' with space to ensure standard parsing matches
                 s_in = res['check_in_date'].replace('T', ' ')
                 s_out = res['check_out_date'].replace('T', ' ')
-                
-                # Handle format with or without seconds
                 fmt = "%Y-%m-%d %H:%M:%S" if ":" in s_in else "%Y-%m-%d"
-                
-                cin = datetime.strptime(s_in, fmt)
-                cout = datetime.strptime(s_out, fmt)
-                
-                delta = (cout - cin).days
+                delta = (datetime.strptime(s_out, fmt) - datetime.strptime(s_in, fmt)).days
                 nights = delta if delta > 0 else 1
-            except Exception as e:
-                print(f"Date parsing error: {e}") # Debug print
-                nights = 1
+            except: nights = 1
 
-        # 2. Sum up all services (Base Prices)
         service_total_row = query("SELECT SUM(service_price * quantity) as total FROM reservation_services WHERE reservation_id=?", (reservation_id,), fetchone=True)
         base_total = service_total_row['total'] if service_total_row and service_total_row['total'] is not None else 0.0
-        
-        # 3. Apply Duration Multiplier (Total = Base * Nights)
         service_total = base_total * nights
         
-        # 4. Update Billing Record
         billing = query("SELECT * FROM billing WHERE reservation_id = ?", (reservation_id,), fetchone=True)
 
         if billing:
             discount = billing['discount_amount'] if billing['discount_amount'] else 0.0
+            comp = billing['compensation'] if billing['compensation'] else 0.0
             paid = billing['amount_paid'] if billing['amount_paid'] else 0.0
             
-            final_amount = service_total - discount
+            final_amount = service_total - discount - comp
             if final_amount < 0: final_amount = 0.0
 
             status = 'Paid' if paid >= final_amount else 'Unpaid'
@@ -76,14 +63,12 @@ class CustomerModel:
     def record_payment(reservation_id, customer_id, amount, method):
         CustomerModel.calculate_and_create_bill(reservation_id)
         billing_row = query("SELECT * FROM billing WHERE reservation_id = ?", (reservation_id,), fetchone=True)
-        current_paid = billing_row['amount_paid'] if billing_row['amount_paid'] is not None else 0.0
-        final_amount = billing_row['final_amount'] if billing_row['final_amount'] is not None else 0.0
+        current_paid = billing_row['amount_paid'] or 0.0
+        final_amount = billing_row['final_amount'] or 0.0
         new_paid = current_paid + amount
         status = 'Paid' if new_paid >= final_amount else 'Partial'
-        
         execute("UPDATE billing SET amount_paid=?, status=? WHERE billing_id=?", (new_paid, status, billing_row['billing_id']))
-        return execute("INSERT INTO payment (customer_id, billing_id, amount, payment_method, payment_date) VALUES (?, ?, ?, ?, datetime('now'))", 
-                      (customer_id, billing_row['billing_id'], amount, method))
+        return execute("INSERT INTO payment (customer_id, billing_id, amount, payment_method, payment_date) VALUES (?, ?, ?, ?, datetime('now'))", (customer_id, billing_row['billing_id'], amount, method))
 
     @staticmethod
     def checkout_reservation(reservation_id):
@@ -115,6 +100,35 @@ class RoomModel:
     @staticmethod
     def set_room_status(room_id, status):
         execute("UPDATE room SET status=? WHERE room_id=?", (status, room_id))
+
+class MaintenanceModel:
+    @staticmethod
+    def report_issue(room_id, customer_id, issue, action):
+        execute("""INSERT INTO maintenance_logs (room_id, reported_by_customer_id, issue_description, action_taken, status, date_reported) 
+                   VALUES (?, ?, ?, ?, 'Pending', datetime('now'))""", (room_id, customer_id, issue, action))
+        if room_id: RoomModel.set_room_status(room_id, 'maintenance')
+
+    @staticmethod
+    def resolve_issue(log_id):
+        row = query("SELECT room_id FROM maintenance_logs WHERE log_id=?", (log_id,), fetchone=True)
+        if row:
+            execute("UPDATE maintenance_logs SET status='Resolved', date_resolved=datetime('now') WHERE log_id=?", (log_id,))
+            if row['room_id']: RoomModel.set_room_status(row['room_id'], 'available')
+
+class AmenityModel:
+    @staticmethod
+    def get_available_stock(service_id, stock_total):
+        # Calculate used stock based on active reservations
+        active_usage = query("""
+            SELECT SUM(rs.quantity) as used_count
+            FROM reservation_services rs
+            JOIN reservation r ON rs.reservation_id = r.reservation_id
+            WHERE rs.service_id = ? AND (r.status = 'Checked-in' OR r.status = 'Pending')
+        """, (service_id,), fetchone=True)
+        
+        used = active_usage['used_count'] if active_usage and active_usage['used_count'] else 0
+        available = stock_total - used
+        return max(0, available)
 
 class ResortModel:
     @staticmethod
