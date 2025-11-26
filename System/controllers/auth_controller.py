@@ -1,6 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox
 from db import execute, query 
 from models import AdminModel 
 
@@ -29,9 +29,12 @@ class AuthController:
 
         # Center the window
         login_win.update_idletasks()
-        x = (login_win.winfo_screenwidth() // 2) - (320 // 2)
-        y = (login_win.winfo_screenheight() // 2) - (260 // 2)
-        login_win.geometry(f"320x260+{x}+{y}")
+        try:
+            x = (login_win.winfo_screenwidth() // 2) - (320 // 2)
+            y = (login_win.winfo_screenheight() // 2) - (260 // 2)
+            login_win.geometry(f"320x260+{x}+{y}")
+        except:
+            pass
 
         # Title
         ctk.CTkLabel(login_win, text="Admin Login", font=("Helvetica", 20)).pack(pady=10)
@@ -62,7 +65,6 @@ class AuthController:
                 self.app.deiconify()  # show main window
                 
                 # Call the main app's method to switch UI to Admin Interface
-                # Ensure 'show_admin_interface' exists in your Main App or AdminDashboard controller
                 if hasattr(self.app, 'show_admin_interface'):
                     self.app.show_admin_interface()
                 elif hasattr(self.app, 'admin_dashboard'):
@@ -98,24 +100,59 @@ class AuthController:
 
     def change_admin_credentials(self):
         """
-        Dialog to update admin username/password in the database.
+        Opens a custom window to update admin username/password.
         """
-        # Parent is self.app to ensure dialog appears over the main app
-        new_user = simpledialog.askstring("Change Admin Username", "New username:", parent=self.app)
-        new_pass = simpledialog.askstring("Change Admin Password", "New password:", parent=self.app, show='*')
-        
-        if not new_user or not new_pass:
-            messagebox.showerror("Error", "Both fields are required.")
-            return
-        
-        # Query DB
-        row = query("SELECT admin_id FROM admin LIMIT 1", fetchone=True)
-        
-        if row:
-            # fixed typos: single ? placeholders
-            execute("UPDATE admin SET username=?, password=? WHERE admin_id=?", (new_user, new_pass, row['admin_id']))
-            messagebox.showinfo("Success", "Admin credentials updated.")
-        else:
-            messagebox.showerror("Error", "Admin record not found.")
+        # Create a new top-level window
+        win = ctk.CTkToplevel(self.app)
+        win.title("Change Admin Credentials")
+        win.geometry("350x300")
+        win.resizable(False, False)
+        win.transient(self.app)  # Keep on top of main window
+        win.grab_set()           # Modal dialog behavior
 
+        # Center the window
+        win.update_idletasks()
+        try:
+            x = (win.winfo_screenwidth() // 2) - (350 // 2)
+            y = (win.winfo_screenheight() // 2) - (300 // 2)
+            win.geometry(f"+{x}+{y}")
+        except:
+            pass
+
+        ctk.CTkLabel(win, text="Update Credentials", font=("Helvetica", 18, "bold")).pack(pady=15)
+
+        # New Username
+        ctk.CTkLabel(win, text="New Username:").pack(pady=(5, 0))
+        user_entry = ctk.CTkEntry(win, width=220)
+        user_entry.pack(pady=5)
+
+        # New Password
+        ctk.CTkLabel(win, text="New Password:").pack(pady=(5, 0))
+        pass_entry = ctk.CTkEntry(win, width=220, show="*")
+        pass_entry.pack(pady=5)
+
+        def save_credentials():
+            new_user = user_entry.get().strip()
+            new_pass = pass_entry.get().strip()
+
+            if not new_user or not new_pass:
+                messagebox.showerror("Error", "Both username and password are required.", parent=win)
+                return
+
+            # Query to find the admin to update
+            row = query("SELECT admin_id FROM admin LIMIT 1", fetchone=True)
             
+            if row:
+                try:
+                    # Use AdminModel logic or direct execution
+                    AdminModel.change_credentials(row['admin_id'], new_user, new_pass)
+                    messagebox.showinfo("Success", "Admin credentials updated successfully.", parent=win)
+                    win.destroy()
+                except Exception as e:
+                    messagebox.showerror("Database Error", f"Failed to update: {e}", parent=win)
+            else:
+                messagebox.showerror("Error", "Admin record not found.", parent=win)
+
+        # Buttons
+        ctk.CTkButton(win, text="Save Changes", command=save_credentials, fg_color="green").pack(pady=15)
+        ctk.CTkButton(win, text="Cancel", command=win.destroy, fg_color="transparent", border_width=1, text_color=("gray10", "gray90")).pack(pady=5)

@@ -6,10 +6,12 @@ class AdminDashboard:
         self.app = app
 
     def show_admin_interface(self):
+        # --- FIX: Resize window to a larger dashboard size ---
+        self.app.geometry("1024x720") 
+        self.app.resizable(True, True)
         # 1. Clear window
         for widget in self.app.winfo_children():
             widget.destroy()
-
         # 2. Re-create container
         self.app.container = ctk.CTkFrame(self.app)
         self.app.container.pack(fill="both", expand=True)
@@ -42,13 +44,14 @@ class AdminDashboard:
         ctk.CTkButton(frame, text="New Customer / Register", command=self.app.customer_controller.customer_register).pack(pady=8)
 
         # Logout
-        ctk.CTkButton(frame, text="Logout", command=self.app.auth_controller.logout_admin, fg_color="#7f8c8d", hover_color="#95a5a6").pack(pady=20)
+        ctk.CTkButton(frame, text="Logout", command=self.app.auth_controller.logout_admin, fg_color="#ff0000", hover_color="#eb1010").pack(pady=20)
 
     def show_admin_customer_dashboard(self):
         if not hasattr(self.app, 'current_customer') or not self.app.current_customer:
             messagebox.showerror("Error", "No customer loaded.")
             return
-        
+        # Ensure window is large if accessing from other contexts
+        self.app.geometry("1024x720")
         self.app.window_manager.clear_container()
         frame = ctk.CTkScrollableFrame(self.app.container)
         frame.pack(pady=12, padx=12, expand=True, fill="both")
