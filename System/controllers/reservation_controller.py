@@ -1,11 +1,10 @@
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox
 from datetime import datetime, date, timedelta
 from db import get_conn, query
 from models import RoomModel, ResortModel, AmenityModel
 
-# Try importing tkcalendar
 try:
     from tkcalendar import DateEntry
     TKCALENDAR_AVAILABLE = True
@@ -19,14 +18,15 @@ class ReservationController:
         self.room_id_var = None
         self.room_selection_display_var = None
         self.room_capacity = 0
-        self.room_selection_label = None
         self.room_capacity_label = None
         self.cart_items_container = None
         self.total_label = None
         self.checkin_widget = None
         self.checkout_widget = None
         self.type_var = None
+        self.guest_vars = {}
         
+        # Time Vars for Day Tour
         self.start_h = None
         self.start_m = None
         self.start_p = None
@@ -46,449 +46,375 @@ class ReservationController:
             JOIN customer c ON r.customer_id = c.customer_id
             LEFT JOIN room rm ON r.room_id = rm.room_id
             LEFT JOIN billing b ON r.reservation_id = b.reservation_id
-            ORDER BY ABS(julianday(r.check_in_date) - julianday('now')) ASC
+            ORDER BY r.check_in_date DESC
         """, fetchall=True)
         
         if not rows:
             ctk.CTkLabel(frame, text="No reservations found.", font=("Arial", 16)).pack(pady=20)
         else:
             for r in rows:
-                card = ctk.CTkFrame(frame, fg_color=("gray85", "gray25"), corner_radius=8, border_width=1, border_color="gray50")
+                card = ctk.CTkFrame(frame, fg_color=("gray85", "gray25"), corner_radius=8)
                 card.pack(fill='x', pady=8, padx=10)
                 
                 header_frame = ctk.CTkFrame(card, fg_color="transparent")
                 header_frame.pack(fill='x', padx=15, pady=(10, 5))
                 status_color = "#27ae60" if r['status'] == 'Checked-in' else ("#c0392b" if r['status'] == 'Cancelled' else "#f39c12")
                 
-                ctk.CTkLabel(header_frame, text=f"Res #{r['reservation_id']}  |  {r['full_name']}", font=("Arial", 18, "bold")).pack(side="left")
+                ctk.CTkLabel(header_frame, text=f"Res #{r['reservation_id']} | {r['full_name']}", font=("Arial", 18, "bold")).pack(side="left")
                 ctk.CTkLabel(header_frame, text=f"[{r['status']}]", text_color=status_color, font=("Arial", 16, "bold")).pack(side="right")
-                ctk.CTkFrame(card, height=2, fg_color="gray60").pack(fill="x", padx=10, pady=5)
 
-                body_frame = ctk.CTkFrame(card, fg_color="transparent")
-                body_frame.pack(fill='x', padx=15, pady=5)
-                left_col = ctk.CTkFrame(body_frame, fg_color="transparent")
-                left_col.pack(side="left", fill="both", expand=True)
+                cin = r['check_in_date'].replace('T', ' ')
+                cout = r['check_out_date'].replace('T', ' ')
                 
-                room_txt = f"{r['room_number']} ({r['room_type']})" if r['room_number'] else "No Unit Assigned"
-                guests_txt = f"Adults: {r['count_adults']}, Kids: {r['count_kids']}, Seniors: {r['count_seniors']}, PWD: {r['count_pwd']}"
-                ctk.CTkLabel(left_col, text=f"Unit: {room_txt}", font=("Arial", 14, "bold"), anchor="w").pack(fill="x")
-                ctk.CTkLabel(left_col, text=f"Dates: {r['check_in_date']}  ➔  {r['check_out_date']}", font=("Arial", 14), anchor="w").pack(fill="x")
-                ctk.CTkLabel(left_col, text=f"Guests ({r['num_guests']} Total): {guests_txt}", font=("Arial", 14), anchor="w").pack(fill="x")
+                details = (f"Unit: {r['room_number'] or 'Day Tour/None'}\n"
+                           f"Date: {cin} -> {cout}\n"
+                           f"Pax: Adult({r['count_adults']}), Teen/Kid({r['count_teens']}), Toddler({r['count_kids']})")
+                
+                ctk.CTkLabel(card, text=details, justify="left", font=("Arial", 14)).pack(anchor="w", padx=15, pady=5)
 
-                right_col = ctk.CTkFrame(body_frame, fg_color="transparent")
-                right_col.pack(side="right", fill="y")
-                total = r['final_amount'] if r['final_amount'] else 0.0
-                paid = r['amount_paid'] if r['amount_paid'] else 0.0
-                balance = total - paid
-                ctk.CTkLabel(right_col, text=f"Total: ₱{total:,.2f}", font=("Arial", 14), anchor="e").pack(fill="x")
-                ctk.CTkLabel(right_col, text=f"Paid: ₱{paid:,.2f}", font=("Arial", 14), anchor="e").pack(fill="x")
-                bal_color = "#e74c3c" if balance > 0 else "#27ae60"
-                ctk.CTkLabel(right_col, text=f"Balance: ₱{balance:,.2f}", font=("Arial", 14, "bold"), text_color=bal_color, anchor="e").pack(fill="x")
+        ctk.CTkButton(frame, text="Back", command=self.app.admin_dashboard.show_admin_interface).pack(pady=20)
 
-                services = query("SELECT s.service_name, rs.quantity FROM reservation_services rs JOIN service s ON rs.service_id = s.service_id WHERE rs.reservation_id = ?", (r['reservation_id'],), fetchall=True)
-                if services:
-                    svc_txt = "Services: " + ", ".join([f"{s['service_name']} (x{s['quantity']})" for s in services])
-                    ctk.CTkLabel(card, text=svc_txt, font=("Arial", 13, "italic"), text_color="gray75", anchor="w", wraplength=700).pack(fill="x", padx=15, pady=(5, 10))
-                else:
-                    ctk.CTkLabel(card, text="No additional services.", font=("Arial", 13, "italic"), text_color="gray", anchor="w").pack(fill="x", padx=15, pady=(5, 10))
-
-        ctk.CTkButton(frame, text="Back", font=("Arial", 15, "bold"), height=40, command=self.app.admin_dashboard.show_admin_interface).pack(pady=20)
-
-    def get_stay_duration(self):
-        try:
-            if self.type_var.get() == "Day Tour (Same Day)": return 1
-            if TKCALENDAR_AVAILABLE:
-                d_in, d_out = self.checkin_widget.get_date(), self.checkout_widget.get_date()
-            else:
-                d_in = datetime.strptime(self.checkin_widget.get().strip(), '%Y-%m-%d').date()
-                d_out = datetime.strptime(self.checkout_widget.get().strip(), '%Y-%m-%d').date()
-            delta = (d_out - d_in).days
-            return delta if delta > 0 else 1
-        except: return 1
-
+    # --- MAIN RESERVATION UI ---
     def show_make_reservation(self):
         self.app.cart = []
         self.app.window_manager.clear_container()
         
         frame = ctk.CTkFrame(self.app.container)
         frame.pack(pady=12, padx=12, expand=True, fill="both")
+        
         left = ctk.CTkFrame(frame); left.pack(side="left", expand=True, fill="both", padx=12, pady=12)
-        right = ctk.CTkFrame(frame, width=320); right.pack(side="right", fill="y", padx=12, pady=12)
+        right = ctk.CTkFrame(frame, width=350); right.pack(side="right", fill="y", padx=12, pady=12)
 
-        ctk.CTkLabel(left, text="Create Reservation / Check-In", font=("Helvetica", 18)).pack(pady=8)
+        ctk.CTkLabel(left, text="Create Reservation", font=("Arial", 22, "bold")).pack(pady=10)
+        
+        # 1. Type
         self.type_var = tk.StringVar(value="Overnight Stay")
         
-        def toggle_inputs(value):
-            for widget in schedule_container.winfo_children(): widget.pack_forget()
-            if value == "Overnight Stay": date_frame.pack(in_=schedule_container, pady=6)
-            else: time_frame.pack(in_=schedule_container, pady=6)
+        def on_type_change(value):
+            if value == "Day Tour (Future/Same Day)":
+                if TKCALENDAR_AVAILABLE: self.checkout_widget.pack_forget() 
+                self.checkout_lbl.pack_forget()
+                self.time_frame.pack(in_=schedule_container, pady=5)
+            else:
+                if TKCALENDAR_AVAILABLE: self.checkout_widget.pack(side="left", padx=5)
+                self.checkout_lbl.pack(side="left", padx=5)
+                self.time_frame.pack_forget()
             self.update_cart_preview()
 
-        seg_btn = ctk.CTkSegmentedButton(left, values=["Overnight Stay", "Day Tour (Same Day)"], variable=self.type_var, command=toggle_inputs)
-        seg_btn.pack(pady=10); seg_btn.set("Overnight Stay")
+        seg = ctk.CTkSegmentedButton(left, values=["Overnight Stay", "Day Tour (Future/Same Day)"], variable=self.type_var, command=on_type_change)
+        seg.pack(pady=10); seg.set("Overnight Stay")
 
-        schedule_container = ctk.CTkFrame(left, fg_color="transparent"); schedule_container.pack(pady=5, fill="x")
+        # 2. Schedule
+        schedule_container = ctk.CTkFrame(left, fg_color="transparent")
+        schedule_container.pack(pady=5, fill="x")
 
         date_frame = ctk.CTkFrame(schedule_container, fg_color="transparent")
+        date_frame.pack(pady=5)
+        
+        ctk.CTkLabel(date_frame, text="Check-in / Date:").pack(side="left", padx=5)
         if TKCALENDAR_AVAILABLE:
-            ctk.CTkLabel(date_frame, text="Check-in:").grid(row=0, column=0, padx=6)
-            self.checkin_widget = DateEntry(date_frame, width=14)
-            self.checkin_widget.grid(row=0, column=1, padx=6)
-            self.checkin_widget.bind("<<DateEntrySelected>>", lambda e: self.update_cart_preview())
-            ctk.CTkLabel(date_frame, text="Check-out:").grid(row=0, column=2, padx=6)
-            self.checkout_widget = DateEntry(date_frame, width=14)
-            self.checkout_widget.grid(row=0, column=3, padx=6)
-            self.checkout_widget.bind("<<DateEntrySelected>>", lambda e: self.update_cart_preview())
+            self.checkin_widget = DateEntry(date_frame, width=12)
+            self.checkin_widget.pack(side="left", padx=5)
+            
+            self.checkout_lbl = ctk.CTkLabel(date_frame, text="Check-out:")
+            self.checkout_lbl.pack(side="left", padx=5)
+            self.checkout_widget = DateEntry(date_frame, width=12)
+            self.checkout_widget.pack(side="left", padx=5)
         else:
-            ctk.CTkLabel(date_frame, text="Check-in (YYYY-MM-DD):").grid(row=0, column=0, padx=6)
-            self.checkin_widget = ctk.CTkEntry(date_frame, width=14)
-            self.checkin_widget.grid(row=0, column=1, padx=6)
-            ctk.CTkLabel(date_frame, text="Check-out (YYYY-MM-DD):").grid(row=0, column=2, padx=6)
-            self.checkout_widget = ctk.CTkEntry(date_frame, width=14)
-            self.checkout_widget.grid(row=0, column=3, padx=6)
-            self.checkin_widget.bind("<FocusOut>", lambda e: self.update_cart_preview()); self.checkout_widget.bind("<FocusOut>", lambda e: self.update_cart_preview())
+            self.checkin_widget = ctk.CTkEntry(date_frame, width=100, placeholder_text="YYYY-MM-DD")
+            self.checkin_widget.pack(side="left", padx=5)
+            self.checkout_lbl = ctk.CTkLabel(date_frame, text="Check-out:")
+            self.checkout_lbl.pack(side="left", padx=5)
+            self.checkout_widget = ctk.CTkEntry(date_frame, width=100, placeholder_text="YYYY-MM-DD")
+            self.checkout_widget.pack(side="left", padx=5)
 
-        time_frame = ctk.CTkFrame(schedule_container, fg_color="transparent")
-        ctk.CTkLabel(time_frame, text="Today's Schedule (12-Hour Format)", font=("Arial", 12, "bold")).pack(pady=5)
-        t_inner = ctk.CTkFrame(time_frame, fg_color="transparent"); t_inner.pack()
+        self.time_frame = ctk.CTkFrame(schedule_container, fg_color="transparent")
+        t_inner = ctk.CTkFrame(self.time_frame, fg_color="transparent"); t_inner.pack()
         hours = [str(i) for i in range(1, 13)]
-        ctk.CTkLabel(t_inner, text="Start:").grid(row=0, column=0, padx=5)
+        ctk.CTkLabel(t_inner, text="Time:").grid(row=0, column=0, padx=5)
         self.start_h = ctk.CTkOptionMenu(t_inner, values=hours, width=60); self.start_h.grid(row=0, column=1)
         self.start_m = ctk.CTkOptionMenu(t_inner, values=["00","15","30","45"], width=60); self.start_m.grid(row=0, column=2)
         self.start_p = ctk.CTkOptionMenu(t_inner, values=["AM","PM"], width=60); self.start_p.grid(row=0, column=3, padx=5); self.start_p.set("AM")
-        ctk.CTkLabel(t_inner, text="End:").grid(row=0, column=4, padx=5)
+        ctk.CTkLabel(t_inner, text="to").grid(row=0, column=4, padx=5)
         self.end_h = ctk.CTkOptionMenu(t_inner, values=hours, width=60); self.end_h.grid(row=0, column=5)
         self.end_m = ctk.CTkOptionMenu(t_inner, values=["00","15","30","45"], width=60); self.end_m.grid(row=0, column=6)
         self.end_p = ctk.CTkOptionMenu(t_inner, values=["AM","PM"], width=60); self.end_p.grid(row=0, column=7, padx=5); self.end_p.set("PM")
-        date_frame.pack(in_=schedule_container, pady=6)
 
-        guest_frame = ctk.CTkFrame(left); guest_frame.pack(pady=10, padx=10, fill='x')
-        ctk.CTkLabel(guest_frame, text="Guest Details", font=("Helvetica", 12, "bold")).pack(pady=5)
-        gf_inner = ctk.CTkFrame(guest_frame, fg_color="transparent"); gf_inner.pack()
-        ctk.CTkLabel(gf_inner, text="Adults:").grid(row=0, column=0, padx=5)
-        adults_var = tk.StringVar(value="1"); ctk.CTkEntry(gf_inner, width=50, textvariable=adults_var).grid(row=0, column=1, padx=5)
-        ctk.CTkLabel(gf_inner, text="Kids:").grid(row=0, column=2, padx=5)
-        kids_var = tk.StringVar(value="0"); ctk.CTkEntry(gf_inner, width=50, textvariable=kids_var).grid(row=0, column=3, padx=5)
-        ctk.CTkLabel(gf_inner, text="PWD:").grid(row=0, column=4, padx=5)
-        pwd_var = tk.StringVar(value="0"); ctk.CTkEntry(gf_inner, width=50, textvariable=pwd_var).grid(row=0, column=5, padx=5)
-        ctk.CTkLabel(gf_inner, text="Seniors:").grid(row=0, column=6, padx=5)
-        senior_var = tk.StringVar(value="0"); ctk.CTkEntry(gf_inner, width=50, textvariable=senior_var).grid(row=0, column=7, padx=5)
+        # 3. Guests
+        gf = ctk.CTkFrame(left)
+        gf.pack(pady=10, fill='x', padx=10)
+        ctk.CTkLabel(gf, text="Guest Count (For Entrance Fees)", font=("Arial", 14, "bold")).pack(pady=5)
+        grid_f = ctk.CTkFrame(gf, fg_color="transparent"); grid_f.pack()
+        
+        labels = ["Adults", "Kids (6+) / Teens", "Toddlers (<=5)", "Seniors (20% Off)", "PWD (20% Off)"]
+        keys = ["adult", "teen", "kid", "senior", "pwd"]
+        
+        self.guest_vars = {}
+        for i, (txt, key) in enumerate(zip(labels, keys)):
+            ctk.CTkLabel(grid_f, text=txt).grid(row=0, column=i, padx=5)
+            v = tk.StringVar(value="0" if key != "adult" else "1")
+            self.guest_vars[key] = v
+            ctk.CTkEntry(grid_f, width=50, textvariable=v).grid(row=1, column=i, padx=5, pady=5)
 
-        ctk.CTkFrame(left, height=2, corner_radius=0, fg_color='gray').pack(fill='x', padx=5, pady=15)
-        ctk.CTkLabel(left, text="Select Accommodation:", font=("Helvetica", 14)).pack(pady=8)
+        # 4. Unit Selection
+        ctk.CTkLabel(left, text="Select Unit (Optional for Day Tour):").pack(pady=(15, 5))
         self.room_id_var = tk.StringVar(value="0")
-        self.room_capacity = 0
         self.room_selection_display_var = tk.StringVar(value="No Unit Selected")
-        ctk.CTkLabel(left, textvariable=self.room_selection_display_var, font=("Helvetica", 12, "bold"), text_color="#F39C12").pack(pady=2)
-        self.room_capacity_label = ctk.CTkLabel(left, text="Capacity: N/A"); self.room_capacity_label.pack(pady=2)
+        self.room_capacity_label = ctk.CTkLabel(left, text="Capacity: N/A", text_color="gray")
+        ctk.CTkLabel(left, textvariable=self.room_selection_display_var, font=("Arial", 14, "bold"), text_color="#e67e22").pack()
+        self.room_capacity_label.pack()
 
-        def get_total_guests():
-            try: return int(adults_var.get() or 0) + int(kids_var.get() or 0) + int(pwd_var.get() or 0) + int(senior_var.get() or 0)
-            except: return 0
+        btn_row = ctk.CTkFrame(left, fg_color="transparent")
+        btn_row.pack(pady=5)
+        ctk.CTkButton(btn_row, text="Find Rooms", command=lambda: self.find_units("Room")).pack(side="left", padx=5)
+        ctk.CTkButton(btn_row, text="Find Cottages", command=lambda: self.find_units("Cottage")).pack(side="left", padx=5)
+        
+        # Restaurant Menu
+        ctk.CTkButton(btn_row, text="Restaurant Menu", command=self.open_restaurant_menu, fg_color="#e67e22", hover_color="#d35400").pack(side="left", padx=5)
 
-        def check_availability_and_select(unit_type):
-            try:
-                guests = get_total_guests()
-                if guests <= 0: messagebox.showerror('Guests','Total guests must be at least 1'); return
+        # 5. Amenities & Packages
+        ctk.CTkLabel(left, text="Packages & Amenities:", font=("Arial", 14, "bold")).pack(pady=(15, 5))
+        svc_frame = ctk.CTkScrollableFrame(left, height=200)
+        svc_frame.pack(fill="both", expand=True)
+        
+        ctk.CTkLabel(svc_frame, text="--- PACKAGES (Auto-Selects Room) ---", font=("Arial", 12, "bold")).pack(anchor="w")
+        packs = query("SELECT * FROM service WHERE category='Package'", fetchall=True)
+        self.populate_services(svc_frame, packs)
+        
+        ctk.CTkLabel(svc_frame, text="--- AMENITIES & ACTIVITIES ---", font=("Arial", 12, "bold")).pack(anchor="w", pady=(10,0))
+        items = query("SELECT * FROM service WHERE category != 'Package' AND category != 'Food' AND service_name NOT LIKE 'Room Fee%' AND service_name NOT LIKE 'Cottage%'", fetchall=True)
+        self.populate_services(svc_frame, items)
 
-                if self.type_var.get() == "Overnight Stay":
-                    if TKCALENDAR_AVAILABLE: d_in, d_out = self.checkin_widget.get_date(), self.checkout_widget.get_date()
-                    else: d_in, d_out = datetime.strptime(self.checkin_widget.get(), '%Y-%m-%d').date(), datetime.strptime(self.checkout_widget.get(), '%Y-%m-%d').date()
-                    checkin = datetime.combine(d_in, datetime.min.time())
-                    checkout = datetime.combine(d_out, datetime.min.time())
-                    if d_out <= d_in: messagebox.showerror('Date Error','Check-out must be after check-in'); return
-                else:
-                    today = date.today()
-                    s_h, s_m, s_p = int(self.start_h.get()), int(self.start_m.get()), self.start_p.get()
-                    e_h, e_m, e_p = int(self.end_h.get()), int(self.end_m.get()), self.end_p.get()
-                    if s_p == "PM" and s_h != 12: s_h += 12
-                    if s_p == "AM" and s_h == 12: s_h = 0
-                    if e_p == "PM" and e_h != 12: e_h += 12
-                    if e_p == "AM" and e_h == 12: e_h = 0
-                    checkin = datetime.combine(today, datetime.min.time().replace(hour=s_h, minute=int(self.start_m.get())))
-                    checkout = datetime.combine(today, datetime.min.time().replace(hour=e_h, minute=int(self.end_m.get())))
-                    if checkout <= checkin: checkout += timedelta(days=1)
-            except Exception as e: messagebox.showerror('Input Error', f'Error: {e}'); return
+        # 6. Cart
+        ctk.CTkLabel(right, text="Bill Preview", font=("Arial", 18, "bold")).pack(pady=10)
+        self.cart_items_container = ctk.CTkScrollableFrame(right, height=400)
+        self.cart_items_container.pack(fill="both", expand=True)
+        self.total_label = ctk.CTkLabel(right, text="TOTAL: ₱0.00", font=("Arial", 20, "bold"))
+        self.total_label.pack(pady=10)
+        ctk.CTkButton(right, text="Confirm Reservation", command=self.process_confirmation, fg_color="green", height=50).pack(fill="x", pady=10)
+        ctk.CTkButton(right, text="Clear", command=self.clear_cart, fg_color="#c0392b").pack(fill="x")
 
-            # --- CHANGED: Use get_all_rooms_status to show Occupied/Maintenance statuses ---
-            all_units = RoomModel.get_all_rooms_status(checkin.isoformat(), checkout.isoformat(), unit_type)
-            
-            if not all_units: messagebox.showerror("Unavailable", f"No {unit_type}s found in system."); self.room_id_var.set("0"); return
-            self.open_room_selection(all_units, guests, unit_type)
-
-        btn_frame = ctk.CTkFrame(left, fg_color="transparent"); btn_frame.pack(pady=6)
-        ctk.CTkButton(btn_frame, text="Find Rooms", command=lambda: check_availability_and_select('Room'), width=140).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Find Cottages", command=lambda: check_availability_and_select('Cottage'), width=140).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Restaurant Menu", command=self.open_restaurant_menu, width=140, fg_color="#e67e22", hover_color="#d35400").pack(side="left", padx=5)
-
-        ctk.CTkLabel(left, text="Other Amenities / Extras:", font=("Helvetica", 14)).pack(pady=8)
-        svc_list_frame = ctk.CTkScrollableFrame(left, height=240); svc_list_frame.pack(fill="both", expand=True, padx=6)
-        services = query("""SELECT service_id, service_name, base_price, stock_total FROM service 
-                            WHERE service_name NOT LIKE 'Room Fee%' AND service_name NOT LIKE 'Cottage%' AND service_name NOT LIKE 'Meal%'""", fetchall=True) or []
-        self.populate_service_list(svc_list_frame, services)
-
-        ctk.CTkLabel(right, text="Cart Preview", font=("Helvetica", 16)).pack(pady=8)
-        cart_frame = ctk.CTkFrame(right); cart_frame.pack(fill='both', expand=True, padx=6, pady=6)
-        self.cart_items_container = ctk.CTkScrollableFrame(cart_frame, height=380); self.cart_items_container.pack(fill='both', expand=True, padx=4, pady=4)
-        totals_frame = ctk.CTkFrame(right); totals_frame.pack(fill='x', pady=6)
-        self.total_label = ctk.CTkLabel(totals_frame, text='Total: ₱0.00', font=(None, 14)); self.total_label.pack(side='left', padx=8)
-
-        def handle_confirm():
-            mode = self.type_var.get()
-            try:
-                guests = get_total_guests()
-                if guests <= 0: raise ValueError
-                if mode == "Overnight Stay":
-                    if TKCALENDAR_AVAILABLE: d_in, d_out = self.checkin_widget.get_date(), self.checkout_widget.get_date()
-                    else: d_in, d_out = datetime.strptime(self.checkin_widget.get(), '%Y-%m-%d').date(), datetime.strptime(self.checkout_widget.get(), '%Y-%m-%d').date()
-                    checkin_dt, checkout_dt = datetime.combine(d_in, datetime.min.time()), datetime.combine(d_out, datetime.min.time())
-                else:
-                    today = date.today()
-                    s_h, s_m, s_p = int(self.start_h.get()), int(self.start_m.get()), self.start_p.get()
-                    e_h, e_m, e_p = int(self.end_h.get()), int(self.end_m.get()), self.end_p.get()
-                    if s_p == "PM" and s_h != 12: s_h += 12
-                    if s_p == "AM" and s_h == 12: s_h = 0
-                    if e_p == "PM" and e_h != 12: e_h += 12
-                    if e_p == "AM" and e_h == 12: e_h = 0
-                    checkin_dt = datetime.combine(today, datetime.min.time().replace(hour=s_h, minute=int(self.start_m.get())))
-                    checkout_dt = datetime.combine(today, datetime.min.time().replace(hour=e_h, minute=int(self.end_m.get())))
-                    if checkout_dt <= checkin_dt: checkout_dt += timedelta(days=1)
-                self.confirm_reservation(checkin_dt, checkout_dt, adults_var, kids_var, pwd_var, senior_var)
-            except Exception as e: print(e); messagebox.showerror("Error", "Invalid inputs.")
-
-        btns = ctk.CTkFrame(right); btns.pack(pady=8)
-        ctk.CTkButton(btns, text='Clear Cart', command=lambda: (self.app.cart.clear(), self.update_cart_preview()), fg_color="#d63031").pack(side='left', padx=6)
-        ctk.CTkButton(btns, text='Confirm', fg_color='#2aa198', command=handle_confirm).pack(side='left', padx=6)
-        ctk.CTkButton(btns, text='Cancel', command=self.app.admin_dashboard.show_admin_customer_dashboard).pack(side='left', padx=6)
         self.update_cart_preview()
 
+    # --- RESTAURANT MENU POPUP ---
     def open_restaurant_menu(self):
-        dialog = ctk.CTkToplevel(self.app)
-        dialog.title("Restaurant Menu"); dialog.geometry("500x500"); dialog.transient(self.app); dialog.grab_set()
-        ctk.CTkLabel(dialog, text="Select Meals", font=("Helvetica", 20, "bold")).pack(pady=10)
-        food_frame = ctk.CTkScrollableFrame(dialog); food_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        meals = query("SELECT service_id, service_name, base_price, description, stock_total FROM service WHERE service_name LIKE 'Meal%'", fetchall=True)
-        self.populate_service_list(food_frame, meals)
-        ctk.CTkButton(dialog, text="Done / Close", command=dialog.destroy).pack(pady=10)
+        win = ctk.CTkToplevel(self.app)
+        win.title("Restaurant Menu")
+        win.geometry("500x500")
+        win.transient(self.app)
+        
+        ctk.CTkLabel(win, text="Order Food / Meals", font=("Arial", 18, "bold")).pack(pady=10)
+        scroll = ctk.CTkScrollableFrame(win)
+        scroll.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        foods = query("SELECT * FROM service WHERE category='Food'", fetchall=True)
+        self.populate_services(scroll, foods)
+        
+        ctk.CTkButton(win, text="Close / Done", command=win.destroy).pack(pady=10)
 
-    def populate_service_list(self, parent_frame, services_data):
-        for svc in services_data:
-            sid, name, price, stock = svc['service_id'], svc['service_name'], svc['base_price'], svc['stock_total']
-            avail = AmenityModel.get_available_stock(sid, stock)
-            rowf = ctk.CTkFrame(parent_frame); rowf.pack(fill='x', pady=4, padx=6)
-            stk_txt = f"(Stock: {avail})" if stock < 100 else ""
-            lbl = ctk.CTkLabel(rowf, text=f"{name}\n₱{price:.2f} {stk_txt}", justify="left"); lbl.pack(side='left', padx=5)
-            qty_var = tk.StringVar(value='1'); ctk.CTkEntry(rowf, width=40, textvariable=qty_var).pack(side='right', padx=4)
-            def add_action(s=sid, n=name, p=price, q=qty_var, total_s=stock):
-                if "Extra Bed" in n:
-                    if not self.room_id_var.get() or self.room_id_var.get() == "0": messagebox.showerror("Action Blocked", "Select Room/Cottage first."); return
+    # --- HELPERS ---
+    def find_units(self, u_type):
+        d_in, d_out = self.get_dates()
+        if not d_in: return
+        if d_in.date() < date.today(): messagebox.showerror("Error", "Past dates not allowed."); return
+        
+        all_units = RoomModel.get_all_rooms_status(d_in.isoformat(), d_out.isoformat(), u_type)
+        if not all_units: messagebox.showerror("Info", f"No {u_type}s found."); return
+        
+        try: total = sum(int(v.get()) for v in self.guest_vars.values())
+        except: total = 1
+        
+        self.open_unit_selector(all_units, total, u_type)
+
+    def open_unit_selector(self, units, guests, u_type, package_override=None):
+        win = ctk.CTkToplevel(self.app)
+        win.title(f"Select {u_type}")
+        win.geometry("500x500")
+        
+        title = f"Select {u_type} for Package" if package_override else f"Available {u_type}s"
+        ctk.CTkLabel(win, text=title, font=("Arial", 18, "bold")).pack(pady=10)
+        scroll = ctk.CTkScrollableFrame(win)
+        scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        sel_var = tk.StringVar(value=self.room_id_var.get())
+        for u in units:
+            st = u['calculated_status']; cap = u['room_capacity']
+            ok = (st == 'Available'); col = "green" if ok else "red"
+            
+            # If triggered by a package, ensure capacity is enough
+            if package_override:
+                req_cap = package_override['linked_room_capacity']
+                if req_cap and cap < req_cap:
+                    ok = False
+                    col = "gray"
+                    st += " (Too Small)"
+
+            rb = ctk.CTkRadioButton(scroll, text=f"{u['room_number']} (Cap: {cap}) - {st}", variable=sel_var, value=str(u['room_id']), state="normal" if ok else "disabled", text_color=col)
+            rb.pack(anchor="w", pady=5)
+            
+        def confirm():
+            rid = sel_var.get()
+            if rid == "0": return
+            sel_u = next((u for u in units if str(u['room_id']) == rid), None)
+            if sel_u:
+                self.room_id_var.set(rid)
+                self.room_selection_display_var.set(f"{sel_u['room_number']} Selected")
+                self.room_capacity_label.configure(text=f"Max Capacity: {sel_u['room_capacity']}")
+                
+                if package_override:
+                    self.add_to_cart_logic(package_override)
+                else:
+                    pat = "Cottage Rental%" if u_type == "Cottage" else f"Room Fee%({sel_u['room_capacity']} Pax)%"
+                    svc = query("SELECT * FROM service WHERE service_name LIKE ?", (pat,), fetchone=True)
+                    self.app.cart = [x for x in self.app.cart if 'Room Fee' not in x['name'] and 'Cottage' not in x['name']]
+                    if svc: self.add_to_cart_logic(svc)
+                
+                win.destroy()
+        ctk.CTkButton(win, text="Select", command=confirm).pack(pady=10)
+
+    def populate_services(self, parent, items):
+        if not items: 
+            ctk.CTkLabel(parent, text="No items.").pack()
+            return
+        for i in items:
+            f = ctk.CTkFrame(parent, fg_color="transparent")
+            f.pack(fill="x", pady=5) # Increased padding
+            
+            # --- FIX: FULL TEXT + WRAPPING ---
+            # Removed [:40] slice and added wraplength
+            text_content = f"{i['service_name']}\n₱{i['base_price']:.0f} - {i['description']}"
+            
+            lbl = ctk.CTkLabel(f, text=text_content, anchor="w", justify="left", wraplength=280)
+            lbl.pack(side="left", fill="x", expand=True)
+            
+            def safe_click(item=i):
                 try:
-                    qty = int(str(q.get()).strip()); 
-                    if qty <= 0: raise ValueError
-                except: messagebox.showerror("Invalid qty", "Must be positive."); return
-                curr_avail = AmenityModel.get_available_stock(s, total_s)
-                if qty > curr_avail: messagebox.showerror("Stock Error", f"Not enough stock. Available: {curr_avail}"); return
-                for item in self.app.cart:
-                    if item['service_id'] == s: item['qty'] += qty; self.update_cart_preview(); return
-                self.app.cart.append({'service_id': s, 'name': n, 'unit_price': p, 'qty': qty, 'mode': 'public'})
-                self.update_cart_preview()
-            state = 'normal' if avail > 0 else 'disabled'; btn_text = 'Add' if avail > 0 else 'Out'
-            ctk.CTkButton(rowf, text=btn_text, width=50, command=add_action, state=state).pack(side='right', padx=4)
+                    self.handle_service_click(item)
+                except KeyError as e:
+                    messagebox.showerror("System Error", f"Missing Data: {e}\n\nPlease run init_db.py to update database.")
+                except Exception as e:
+                    messagebox.showerror("Error", f"An error occurred: {e}")
 
-    def update_cart_preview(self): 
-        if not self.cart_items_container or not self.cart_items_container.winfo_exists(): return
+            ctk.CTkButton(f, text="Add", width=50, height=25, command=safe_click).pack(side="right", padx=5)
+
+    def handle_service_click(self, item):
+        if item['category'] == 'Package' and item['linked_room_type']:
+            room_type = item['linked_room_type']
+            d_in, d_out = self.get_dates()
+            if not d_in: return
+            if d_in.date() < date.today(): messagebox.showerror("Error", "Past dates not allowed."); return
+            
+            units = RoomModel.get_all_rooms_status(d_in.isoformat(), d_out.isoformat(), room_type)
+            if not units:
+                messagebox.showerror("Unavailable", f"No {room_type}s available for this package.")
+                return
+
+            messagebox.showinfo("Select Room", f"This package comes with a {room_type}.\nPlease select one now.")
+            try: total = sum(int(v.get()) for v in self.guest_vars.values())
+            except: total = 1
+            self.open_unit_selector(units, total, room_type, package_override=item)
+            return
+
+        self.add_to_cart_logic(item)
+
+    def add_to_cart_logic(self, item):
+        if item['category'] == 'Package':
+             self.app.cart = [x for x in self.app.cart if x['category'] != 'Package' and 'Room Fee' not in x['name'] and 'Cottage' not in x['name']]
+
+        for c in self.app.cart:
+            if c['id'] == item['service_id']:
+                c['qty'] += 1
+                self.update_cart_preview(); return
+        
+        cat = item['category'] if 'category' in item else 'Service'
+        self.app.cart.append({'id': item['service_id'], 'name': item['service_name'], 'price': item['base_price'], 'qty': 1, 'category': cat})
+        self.update_cart_preview()
+
+    def update_cart_preview(self):
         for w in self.cart_items_container.winfo_children(): w.destroy()
-        nights = self.get_stay_duration()
-        total = 0.0
-        for idx, item in enumerate(self.app.cart, start=1):
-            row = ctk.CTkFrame(self.cart_items_container); row.pack(fill='x', pady=4, padx=6)
-            line_price = item['unit_price'] * item['qty'] * nights
-            desc = f"{item['name']} x{item['qty']} ({nights} nights)" if nights > 1 else f"{item['name']} x{item['qty']}"
-            ctk.CTkLabel(row, text=desc).pack(side='left')
-            total += line_price
-            ctk.CTkLabel(row, text=f"₱{line_price:.2f}").pack(side='right')
-            def make_rm(i): return lambda: (self.app.cart.pop(i), self.update_cart_preview()) 
-            ctk.CTkButton(row, text='X', width=30, fg_color="red", command=make_rm(idx-1)).pack(side='right', padx=6)
-        self.total_label.configure(text=f"Total: ₱{total:.2f}")
-
-    def add_accommodation_to_cart(self, room):
-        service_name_pattern = ""
-        if room['type'] == 'Cottage': service_name_pattern = "Cottage Rental%"
-        else:
-            if room['room_capacity'] == 1: service_name_pattern = "Room Fee - Single%"
-            elif room['room_capacity'] == 2: service_name_pattern = "Room Fee - Double%"
-            elif room['room_capacity'] == 4: service_name_pattern = "Room Fee - Family%"
-            elif room['room_capacity'] == 6: service_name_pattern = "Room Fee - Suite%"
-        if not service_name_pattern: return 
-        svc = query("SELECT * FROM service WHERE service_name LIKE ?", (service_name_pattern,), fetchone=True)
-        if svc:
-            self.app.cart = [item for item in self.app.cart if "Room Fee" not in item['name'] and "Cottage Rental" not in item['name']]
-            self.app.cart.append({'service_id': svc['service_id'], 'name': svc['service_name'], 'unit_price': svc['base_price'], 'qty': 1, 'mode': 'public'})
-            self.update_cart_preview()
-
-    def open_room_selection(self, units, num_guests, unit_type):
-        def create_dialog():
-            dialog = ctk.CTkToplevel(self.app)
-            dialog.title(f"Select Available {unit_type}")
-            dialog.geometry("600x500")
-            dialog.transient(self.app)
-            dialog.grab_set()
-            ctk.CTkLabel(dialog, text=f"Select {unit_type} for {num_guests} Guests", font=("Helvetica", 18, "bold")).pack(pady=10)
-            scroll_frame = ctk.CTkScrollableFrame(dialog)
-            scroll_frame.pack(padx=10, pady=10, fill="both", expand=True)
-            self.room_selection_dialog_var = tk.StringVar(value=self.room_id_var.get())
-            selected_room_id = self.room_id_var.get() if self.room_id_var.get() != "0" else None
-            sorted_units = sorted(units, key=lambda x: x['room_number'])
-            
-            for unit in sorted_units:
-                unit_info_map[str(unit['room_id'])] = unit
-                cap = unit['room_capacity']
-                status = unit['calculated_status'] # From new SQL query
-                
-                # Determine Logic
-                is_available = (status == 'Available')
-                is_capacity_ok = (cap >= num_guests)
-                
-                icon = "🛖" if unit_type == "Cottage" else "🛏️"
-                
-                # Visual formatting
-                status_color = "green" if is_available else "red"
-                if not is_capacity_ok: status_color = "gray"
-                
-                display_text = f"{icon} {unit['room_number']} (Cap: {cap}) — {status.upper()}"
-                
-                if not is_capacity_ok: 
-                    display_text += " [TOO SMALL]"
-                
-                # Only enable if Available AND Capable
-                state = 'normal' if (is_available and is_capacity_ok) else 'disabled'
-                
-                # Using Radio Button
-                # Note: CTkRadioButton doesn't support text_color change easily dynamically per item without recreation,
-                # but we can append status to text.
-                
-                radio_btn = ctk.CTkRadioButton(scroll_frame, text=display_text, variable=self.room_selection_dialog_var, 
-                                               value=str(unit['room_id']), state=state, font=("Arial", 14))
-                radio_btn.pack(anchor='w', padx=10, pady=6)
-                
-                if str(unit['room_id']) == selected_room_id and is_available and is_capacity_ok: radio_btn.select()
-
-            def on_confirm():
-                selected_id = self.room_selection_dialog_var.get()
-                if selected_id == "" or selected_id == "0": messagebox.showerror("Error", "Please select an option."); return
-                unit = unit_info_map.get(selected_id)
-                self.room_id_var.set(selected_id)
-                self.room_selection_display_var.set(f"{unit['room_number']} Selected")
-                self.room_capacity = unit['room_capacity']
-                self.room_capacity_label.configure(text=f"Max Capacity: {self.room_capacity}")
-                self.add_accommodation_to_cart(unit)
-                dialog.destroy()
-            ctk.CTkButton(dialog, text="Confirm", command=on_confirm, fg_color="#2aa198").pack(pady=10)
-            ctk.CTkButton(dialog, text="Cancel", command=dialog.destroy, fg_color="transparent", border_width=1).pack(pady=5)
-            return dialog
-        unit_info_map = {}
-        self.app.window_manager.focus_or_create_window('room_selection', create_dialog)
-
-    def confirm_reservation(self, checkin_dt, checkout_dt, a_var, k_var, p_var, s_var):
-        a, k, p, s = int(a_var.get() or 0), int(k_var.get() or 0), int(p_var.get() or 0), int(s_var.get() or 0)
-        guests = a + k + p + s
-        room_id = self.room_id_var.get()
-        room_id = int(room_id) if room_id.isdigit() else None
-        requires_unit = any('Room Fee' in item['name'] or 'Cottage Rental' in item['name'] for item in self.app.cart)
-        if requires_unit:
-            if room_id is None or room_id == 0: messagebox.showerror('Selection Error', 'Select a unit first.'); return
-            if guests > RoomModel.get_room_capacity(room_id): messagebox.showerror('Capacity Error', 'Unit too small.'); return
-        else: room_id = None
-
-        is_avail, max_cap, current_load = ResortModel.check_capacity_availability(checkin_dt.isoformat(), checkout_dt.isoformat(), guests)
-        if not is_avail: messagebox.showerror("Capacity Reached", "Resort full."); return
-
-        nights = self.get_stay_duration()
-        subtotal = 0
-        for item in self.app.cart:
-            subtotal += item['unit_price'] * item['qty'] * nights
-        
-        discount_amount = 0.0
-        if guests > 0:
-            per_person_avg = subtotal / guests
-            discount_amount += (p * per_person_avg * 0.20) + (s * per_person_avg * 0.20)
-        final_total = subtotal - discount_amount
-        
-        msg = (f"Check-in: {checkin_dt}\nDuration: {nights} Nights\nGuests: {guests} (A:{a}, K:{k}, P:{p}, S:{s})\n"
-               f"Subtotal: ₱{subtotal:.2f}\nDiscount (PWD/Senior): -₱{discount_amount:.2f}\nTOTAL: ₱{final_total:.2f}\n\nProceed to Payment?")
-        
-        if not messagebox.askyesno('Confirm', msg): return
-        
-        payment_amount = 0.0
-        method_val = "Cash" 
-        
-        if messagebox.askyesno("Payment", "Process Payment Now?"):
-            pay_win = ctk.CTkToplevel(self.app)
-            pay_win.title("Payment")
-            pay_win.geometry("300x250")
-            pay_win.grab_set()
-            
-            ctk.CTkLabel(pay_win, text=f"Total Due: ₱{final_total:.2f}", font=("Arial", 16, "bold")).pack(pady=10)
-            amt_var = tk.StringVar(value=str(final_total))
-            ctk.CTkEntry(pay_win, textvariable=amt_var).pack(pady=5)
-            ctk.CTkLabel(pay_win, text="Method: Cash Only", font=("Arial", 12, "italic"), text_color="gray").pack(pady=5)
-            
-            confirm_pay = tk.BooleanVar(value=False)
-            def do_pay():
-                try:
-                    val = float(amt_var.get())
-                    if val < 0: raise ValueError
-                    if val > final_total:
-                        messagebox.showerror("Payment Error", f"Amount cannot exceed total due (₱{final_total:.2f})")
-                        return
-                    
-                    payment_amount = val
-                    confirm_pay.set(True)
-                    pay_win.destroy()
-                except: messagebox.showerror("Error", "Invalid Amount")
-            
-            ctk.CTkButton(pay_win, text="Pay", command=do_pay).pack(pady=20)
-            self.app.wait_window(pay_win)
-            
-            if confirm_pay.get():
-                payment_amount = float(amt_var.get())
-            else:
-                if not messagebox.askyesno("Cancel", "Save as UNPAID?"): return
-
-        conn = None
+        fees = ResortModel.get_entrance_fees()
         try:
-            conn = get_conn()
-            try:
-                cur = conn.cursor()
-                created_at = datetime.now().isoformat(sep=' ', timespec='seconds')
-                status = 'Checked-in' if checkin_dt.date() == date.today() else 'Pending'
-                cur.execute("INSERT INTO reservation (customer_id, check_in_date, check_out_date, num_guests, count_adults, count_kids, count_pwd, count_seniors, status, notes, created_at, room_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (self.app.current_customer['customer_id'], checkin_dt.isoformat(), checkout_dt.isoformat(), guests, a, k, p, s, status, '', created_at, room_id))
-                reservation_id = cur.lastrowid
-                if room_id:
-                    r_status = 'occupied' if status == 'Checked-in' else 'booked'
-                    cur.execute("UPDATE room SET status=? WHERE room_id=?", (r_status, room_id))
-                for item in self.app.cart:
-                    cur.execute("INSERT INTO reservation_services (reservation_id, service_id, quantity, service_price) VALUES (?, ?, ?, ?)",
-                        (reservation_id, item['service_id'], item['qty'], item['unit_price']))
-                
-                bill_status = 'Paid' if payment_amount >= final_total else ('Partial' if payment_amount > 0 else 'Unpaid')
-                cur.execute("INSERT INTO billing (reservation_id, final_amount, discount_amount, initial_deposit, service_charges, amount_paid, status, cashier_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'Admin Cashier', ?)",
-                    (reservation_id, final_total, discount_amount, 0.0, subtotal, payment_amount, bill_status, created_at))
-                bid = cur.lastrowid
-                
-                if payment_amount > 0:
-                    cur.execute("INSERT INTO payment (customer_id, billing_id, amount, payment_method, payment_date) VALUES (?, ?, ?, ?, ?)",
-                                (self.app.current_customer['customer_id'], bid, payment_amount, method_val, created_at))
+            a, t, k, s, p = int(self.guest_vars['adult'].get()), int(self.guest_vars['teen'].get()), int(self.guest_vars['kid'].get()), int(self.guest_vars['senior'].get()), int(self.guest_vars['pwd'].get())
+        except: a=t=k=s=p=0
+        
+        ent_tot = (a*fees['fee_adult']) + (t*fees['fee_teen']) + (k*fees['fee_kid']) + (s*fees['fee_adult']*0.8) + (p*fees['fee_adult']*0.8)
+        
+        ctk.CTkLabel(self.cart_items_container, text="[Entrance Fees]", font=("Arial", 12, "bold")).pack(anchor="w")
+        if a>0: self.add_line(f"Adults x{a}", a*fees['fee_adult'])
+        if t>0: self.add_line(f"Kids (6+) / Teens x{t}", t*fees['fee_teen'])
+        if k>0: self.add_line(f"Toddlers x{k}", k*fees['fee_kid'])
+        if s>0: self.add_line(f"Seniors x{s} (20%)", s*fees['fee_adult']*0.8)
+        if p>0: self.add_line(f"PWD x{p} (20%)", p*fees['fee_adult']*0.8)
+        
+        d_in, d_out = self.get_dates()
+        nights = (d_out - d_in).days if d_in and d_out else 1
+        if nights < 1: nights = 1
+        
+        ctk.CTkLabel(self.cart_items_container, text="[Services/Rooms]", font=("Arial", 12, "bold")).pack(anchor="w", pady=(5,0))
+        svc_tot = 0
+        
+        for x in self.app.cart:
+            is_room_related = "Room Fee" in x['name'] or x.get('category') == 'Package'
+            lp = x['price'] * x['qty']
+            if is_room_related and nights > 1: 
+                lp *= nights
+                txt = f"{x['name']} x{x['qty']} ({nights}n)"
+            else: 
+                txt = f"{x['name']} x{x['qty']}"
+            self.add_line(txt, lp); svc_tot += lp
+            
+        self.current_calc_total = ent_tot + svc_tot
+        self.total_label.configure(text=f"TOTAL: ₱{self.current_calc_total:,.2f}")
 
-                conn.commit()
-                messagebox.showinfo('Saved', f"Reservation saved. ID: {reservation_id}\nPaid: ₱{payment_amount}")
-                self.app.cart = []
-                self.app.admin_dashboard.show_admin_customer_dashboard()
-            except Exception as e:
-                if conn: conn.rollback(); raise e
-        except Exception as e: messagebox.showerror('DB Error', f"Failed: {e}")
-        finally:
-            if conn: conn.close()
+    # --- FIX: WRAPPING IN CART ---
+    def add_line(self, t, v):
+        f = ctk.CTkFrame(self.cart_items_container, fg_color="transparent", height=20)
+        f.pack(fill="x")
+        # Added wraplength and expanded the text area
+        ctk.CTkLabel(f, text=t, font=("Arial", 12), wraplength=180, justify="left").pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(f, text=f"₱{v:,.2f}", font=("Arial", 12)).pack(side="right", anchor="n")
 
-    def check_in_now(self): pass
+    def get_dates(self):
+        try:
+            if TKCALENDAR_AVAILABLE:
+                d_in = self.checkin_widget.get_date()
+                if self.type_var.get().startswith("Day Tour"): d_out = d_in
+                else: d_out = self.checkout_widget.get_date()
+            else:
+                d_in = datetime.strptime(self.checkin_widget.get(), "%Y-%m-%d").date()
+                if self.type_var.get().startswith("Day Tour"): d_out = d_in
+                else: d_out = datetime.strptime(self.checkout_widget.get(), "%Y-%m-%d").date()
+            return datetime.combine(d_in, datetime.min.time()), datetime.combine(d_out, datetime.min.time())
+        except: return None, None
+
+    def clear_cart(self):
+        self.app.cart = []; self.room_id_var.set("0"); self.room_selection_display_var.set("No Unit Selected"); self.update_cart_preview()
+
+    def process_confirmation(self):
+        d_in, d_out = self.get_dates()
+        if not d_in: messagebox.showerror("Error", "Invalid Dates"); return
+        if d_in.date() < date.today(): messagebox.showerror("Error", "Past dates not allowed"); return
+        
+        notes = f"Day Tour: {self.start_h.get()}:{self.start_m.get()} {self.start_p.get()} - {self.end_h.get()}:{self.end_m.get()} {self.end_p.get()}" if "Day Tour" in self.type_var.get() else "Overnight"
+        
+        try: cts = {k: int(v.get()) for k, v in self.guest_vars.items()}
+        except: cts = {}
+        if sum(cts.values()) == 0: messagebox.showerror("Error", "No guests"); return
+        
+        has_room_item = any(x.get('category') == 'Package' or 'Room Fee' in x['name'] or 'Cottage' in x['name'] for x in self.app.cart)
+        if has_room_item and (self.room_id_var.get() == "0" or not self.room_id_var.get()):
+             messagebox.showerror("Error", "You selected a room/package but no unit is assigned.\nPlease re-select."); return
+
+        if not messagebox.askyesno("Confirm", f"Total: ₱{self.current_calc_total:,.2f}\nProceed?"): return
+        
+        try:
+            conn = get_conn(); cur = conn.cursor()
+            cur.execute("""INSERT INTO reservation (customer_id, check_in_date, check_out_date, num_guests, count_adults, count_teens, count_kids, count_pwd, count_seniors, status, notes, created_at, room_id) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, datetime('now'), ?)""", 
+                        (self.app.current_customer['customer_id'], d_in.isoformat(), d_out.isoformat(), sum(cts.values()), cts['adult'], cts['teen'], cts['kid'], cts['pwd'], cts['senior'], notes, self.room_id_var.get() if self.room_id_var.get() != "0" else None))
+            rid = cur.lastrowid
+            for x in self.app.cart: cur.execute("INSERT INTO reservation_services (reservation_id, service_id, quantity, service_price) VALUES (?, ?, ?, ?)", (rid, x['id'], x['qty'], x['price']))
+            cur.execute("INSERT INTO billing (reservation_id, final_amount, service_charges, status, created_at) VALUES (?, ?, ?, 'Unpaid', datetime('now'))", (rid, self.current_calc_total, self.current_calc_total))
+            conn.commit(); conn.close()
+            messagebox.showinfo("Success", "Reservation Saved"); self.app.admin_dashboard.show_admin_customer_dashboard()
+        except Exception as e: messagebox.showerror("Error", f"{e}")
