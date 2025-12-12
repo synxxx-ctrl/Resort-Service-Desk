@@ -10,7 +10,7 @@ from payment_controller import PaymentController
 from report_controller import ReportController
 from transaction_controller import TransactionController
 from maintenance_controller import MaintenanceController
-asda
+
 class MainApp(ctk.CTk):
     def __init__(self):
         super().__init__()
