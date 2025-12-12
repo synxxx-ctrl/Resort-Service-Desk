@@ -11,7 +11,7 @@ class ReportController:
         # --- MAIN MENU WINDOW ---
         win = ctk.CTkToplevel(self.app)
         win.title("Generate Report")
-        win.geometry("400x450")
+        win.geometry("400x480")
         win.transient(self.app)
         win.grab_set()
 
@@ -42,7 +42,7 @@ class ReportController:
     def open_date_input(self, mode):
         input_win = ctk.CTkToplevel(self.app)
         input_win.title("Select Date")
-        input_win.geometry("350x350") # Slightly taller for buttons
+        input_win.geometry("350x350")
         input_win.transient(self.app)
         input_win.grab_set()
 
@@ -53,8 +53,10 @@ class ReportController:
 
         if mode == "daily":
             ctk.CTkLabel(input_win, text="Date (YYYY-MM-DD):").pack(pady=(10, 5))
-            ent = ctk.CTkEntry(input_win, width=200, placeholder_text="2023-12-25")
+            ent = ctk.CTkEntry(input_win, width=200, placeholder_text="YYYY-MM-DD")
             ent.pack(pady=5)
+            # Default to today
+            ent.insert(0, date.today().isoformat())
             entries['start'] = ent
         else:
             ctk.CTkLabel(input_win, text="Start Date (YYYY-MM-DD):").pack(pady=(5, 2))
@@ -70,16 +72,17 @@ class ReportController:
         def submit():
             try:
                 s_str = entries['start'].get().strip()
-                datetime.strptime(s_str, "%Y-%m-%d") # Validate
+                datetime.strptime(s_str, "%Y-%m-%d") # Validate format
                 
                 if mode == "daily":
+                    # For a daily report, we want the whole 24-hour window
                     start = f"{s_str} 00:00:00"
                     end = f"{s_str} 23:59:59"
                     input_win.destroy()
                     self.generate_complex_report(start, end, f"Daily Report: {s_str}")
                 else:
                     e_str = entries['end'].get().strip()
-                    datetime.strptime(e_str, "%Y-%m-%d") # Validate
+                    datetime.strptime(e_str, "%Y-%m-%d") # Validate format
                     
                     start = f"{s_str} 00:00:00"
                     end = f"{e_str} 23:59:59"
@@ -92,9 +95,7 @@ class ReportController:
         btn_frame = ctk.CTkFrame(input_win, fg_color="transparent")
         btn_frame.pack(pady=30)
 
-        ctk.CTkButton(btn_frame, text="Generate Report", command=submit, fg_color="#27ae60", width=140).pack(side="left", padx=10)
-        
-        # --- ADDED BACK BUTTON ---
+        ctk.CTkButton(btn_frame, text="Generate", command=submit, fg_color="#27ae60", width=140).pack(side="left", padx=10)
         ctk.CTkButton(btn_frame, text="Back", command=input_win.destroy, fg_color="transparent", border_width=1, text_color=("gray10", "gray90"), width=100).pack(side="left", padx=10)
 
     # ------------------------- PRESET REPORTS -------------------------
@@ -105,21 +106,34 @@ class ReportController:
     def generate_weekly_report(self):
         end = datetime.now()
         start = end - timedelta(days=7)
-        self.generate_complex_report(start.isoformat(), end.isoformat(), "Weekly Report (Last 7 Days)")
+        self.generate_complex_report(start.strftime("%Y-%m-%d 00:00:00"), end.strftime("%Y-%m-%d 23:59:59"), "Weekly Report (Last 7 Days)")
 
     def generate_monthly_report(self):
         end = datetime.now()
         start = end - timedelta(days=30)
-        self.generate_complex_report(start.isoformat(), end.isoformat(), "Monthly Report (Last 30 Days)")
+        self.generate_complex_report(start.strftime("%Y-%m-%d 00:00:00"), end.strftime("%Y-%m-%d 23:59:59"), "Monthly Report (Last 30 Days)")
 
     # ------------------------- CORE LOGIC & UI RENDERING -------------------------
 
     def generate_complex_report(self, start_date, end_date, title):
         try:
             # 1. FILTER LOGIC
+            # FIX: We use REPLACE(..., 'T', ' ') to normalize ISO dates from DB (2023-01-01T12:00) 
+            # to SQL standard (2023-01-01 12:00) so comparisons work correctly.
+            
             if start_date and end_date:
-                where_clause = "WHERE (r.check_in_date BETWEEN ? AND ?) OR (r.check_out_date BETWEEN ? AND ?)"
-                params = (start_date, end_date, start_date, end_date)
+                # LOGIC: Find reservations that OVERLAP with the selected range.
+                # (Start of Res <= End of Range) AND (End of Res >= Start of Range)
+                # This catches: Arrivals, Departures, AND Stay-overs (people staying through the day).
+                
+                where_clause = """
+                    WHERE (REPLACE(r.check_in_date, 'T', ' ') <= ?) 
+                      AND (REPLACE(r.check_out_date, 'T', ' ') >= ?)
+                """
+                # Note param order for overlap logic: End of Range, Start of Range
+                params = (end_date, start_date)
+                
+                # Maintenance logs typically use standard spacing, but we filter them normally
                 maint_where = "WHERE date_reported BETWEEN ? AND ?"
                 maint_params = (start_date, end_date)
             else:
@@ -130,10 +144,16 @@ class ReportController:
 
             # 2. FETCH DATA
             
-            # Financials
+            # Financials: Summing data from matching reservations
+            # NOTE: We select DISTINCT reservation_id to avoid double counting if bad joins occur, 
+            # though standard joins on PK are safe.
             fin_row = query(f"""
-                SELECT COUNT(r.reservation_id) as total_res, SUM(b.final_amount) as total_revenue, SUM(b.amount_paid) as total_collected
-                FROM reservation r LEFT JOIN billing b ON r.reservation_id = b.reservation_id
+                SELECT 
+                    COUNT(DISTINCT r.reservation_id) as total_res, 
+                    SUM(b.final_amount) as total_revenue, 
+                    SUM(b.amount_paid) as total_collected
+                FROM reservation r 
+                LEFT JOIN billing b ON r.reservation_id = b.reservation_id
                 {where_clause}
             """, params, fetchone=True)
             
@@ -142,34 +162,48 @@ class ReportController:
             total_col = fin_row['total_collected'] or 0.0
             outstanding = total_rev - total_col
 
-            # Service Usage
+            # Service Usage: Items consumed by these guests
             svc_rows = query(f"""
                 SELECT s.service_name, SUM(rs.quantity) as usage_count
                 FROM reservation_services rs
                 JOIN reservation r ON rs.reservation_id = r.reservation_id
                 JOIN service s ON rs.service_id = s.service_id
-                {where_clause} GROUP BY s.service_name ORDER BY usage_count DESC
+                {where_clause} 
+                GROUP BY s.service_name 
+                ORDER BY usage_count DESC
             """, params, fetchall=True)
 
             # Maintenance
             maint_rows = query(f"""
-                SELECT COUNT(*) as issue_count, status FROM maintenance_logs 
-                {maint_where} GROUP BY status
+                SELECT COUNT(*) as issue_count, status 
+                FROM maintenance_logs 
+                {maint_where} 
+                GROUP BY status
             """, maint_params, fetchall=True)
             
             # Detailed List
             res_rows = query(f"""
-                SELECT r.reservation_id, c.full_name, r.check_in_date, r.check_out_date, r.status, b.final_amount, b.amount_paid
-                FROM reservation r JOIN customer c ON r.customer_id = c.customer_id
+                SELECT 
+                    r.reservation_id, 
+                    c.full_name, 
+                    REPLACE(r.check_in_date, 'T', ' ') as check_in_display, 
+                    REPLACE(r.check_out_date, 'T', ' ') as check_out_display, 
+                    r.status, 
+                    b.final_amount, 
+                    b.amount_paid
+                FROM reservation r 
+                JOIN customer c ON r.customer_id = c.customer_id
                 LEFT JOIN billing b ON r.reservation_id = b.reservation_id
-                {where_clause} ORDER BY r.check_in_date DESC
+                {where_clause} 
+                ORDER BY r.check_in_date DESC
             """, params, fetchall=True)
 
-            # 3. RENDER THE FANCY UI
+            # 3. RENDER THE UI
             self.show_report_window(title, total_res, total_rev, total_col, outstanding, svc_rows, maint_rows, res_rows)
 
         except Exception as e:
             messagebox.showerror("Report Error", f"Failed to generate:\n{e}", parent=self.app)
+            print(e) # For debugging in console
 
     def show_report_window(self, title, t_res, t_rev, t_col, t_out, svc_data, maint_data, res_data):
         rep_win = ctk.CTkToplevel(self.app)
@@ -190,11 +224,11 @@ class ReportController:
         fin_frame.pack(fill="x", pady=20, padx=10)
         fin_frame.columnconfigure((0,1,2), weight=1)
 
-        self.create_stat_card(fin_frame, "Total Revenue", f"₱{t_rev:,.2f}", "#2980b9", 0, 0)
+        self.create_stat_card(fin_frame, "Total Revenue (Billed)", f"₱{t_rev:,.2f}", "#2980b9", 0, 0)
         self.create_stat_card(fin_frame, "Cash Collected", f"₱{t_col:,.2f}", "#27ae60", 0, 1)
-        self.create_stat_card(fin_frame, "Outstanding", f"₱{t_out:,.2f}", "#c0392b", 0, 2)
+        self.create_stat_card(fin_frame, "Outstanding Balance", f"₱{t_out:,.2f}", "#c0392b", 0, 2)
         
-        ctk.CTkLabel(main_scroll, text=f"Total Reservations: {t_res}", font=("Arial", 14, "bold")).pack(pady=5)
+        ctk.CTkLabel(main_scroll, text=f"Active Reservations: {t_res}", font=("Arial", 14, "bold")).pack(pady=5)
 
         # --- SECTION 2: SPLIT VIEW (SERVICES & MAINTENANCE) ---
         split_frame = ctk.CTkFrame(main_scroll, fg_color="transparent")
@@ -204,7 +238,7 @@ class ReportController:
         # Services Column
         svc_card = ctk.CTkFrame(split_frame, corner_radius=10)
         svc_card.grid(row=0, column=0, sticky="nsew", padx=5)
-        ctk.CTkLabel(svc_card, text="Top Amenities Used", font=("Arial", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(svc_card, text="Top Amenities Consumed", font=("Arial", 16, "bold")).pack(pady=10)
         if svc_data:
             for s in svc_data:
                 row = ctk.CTkFrame(svc_card, fg_color="transparent")
@@ -212,13 +246,13 @@ class ReportController:
                 ctk.CTkLabel(row, text=s['service_name'], anchor="w").pack(side="left")
                 ctk.CTkLabel(row, text=f"x{s['usage_count']}", font=("Arial", 12, "bold")).pack(side="right")
         else:
-            ctk.CTkLabel(svc_card, text="No data available", text_color="gray").pack(pady=10)
+            ctk.CTkLabel(svc_card, text="No amenities recorded.", text_color="gray").pack(pady=10)
         ctk.CTkLabel(svc_card, text="").pack(pady=5) # Spacer
 
         # Maintenance Column
         maint_card = ctk.CTkFrame(split_frame, corner_radius=10)
         maint_card.grid(row=0, column=1, sticky="nsew", padx=5)
-        ctk.CTkLabel(maint_card, text="Maintenance Summary", font=("Arial", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(maint_card, text="Maintenance Issues", font=("Arial", 16, "bold")).pack(pady=10)
         
         total_issues = sum(m['issue_count'] for m in maint_data) if maint_data else 0
         ctk.CTkLabel(maint_card, text=f"Total Reports: {total_issues}", font=("Arial", 24, "bold"), text_color="#e67e22").pack(pady=5)
@@ -227,35 +261,38 @@ class ReportController:
             for m in maint_data:
                 ctk.CTkLabel(maint_card, text=f"{m['status']}: {m['issue_count']}", font=("Arial", 13)).pack()
         else:
-            ctk.CTkLabel(maint_card, text="No issues reported", text_color="gray").pack(pady=5)
+            ctk.CTkLabel(maint_card, text="No issues reported.", text_color="gray").pack(pady=5)
         
         ctk.CTkLabel(maint_card, text="").pack(pady=5)
 
         # --- SECTION 3: DETAILED TABLE ---
-        ctk.CTkLabel(main_scroll, text="Reservation Logs", font=("Arial", 18, "bold")).pack(pady=(25, 10), anchor="w", padx=15)
+        ctk.CTkLabel(main_scroll, text="Guest Logs (Overlapping)", font=("Arial", 18, "bold")).pack(pady=(25, 10), anchor="w", padx=15)
         
         # Table Header
         header = ctk.CTkFrame(main_scroll, height=35, fg_color="gray30")
         header.pack(fill="x", padx=10)
-        headers = [("ID", 50), ("Customer", 200), ("Status", 100), ("Check-In", 100), ("Total", 100), ("Paid", 100)]
+        headers = [("ID", 50), ("Customer", 200), ("Status", 90), ("Check-In", 110), ("Total", 100), ("Paid", 100)]
         for txt, w in headers:
             f = ctk.CTkFrame(header, width=w, fg_color="transparent")
             f.pack(side="left", fill="y", expand=True)
-            ctk.CTkLabel(f, text=txt, font=("Arial", 12, "bold")).pack()
+            ctk.CTkLabel(f, text=txt, font=("Arial", 12, "bold", "italic")).pack()
 
         # Rows
         if not res_data:
-            ctk.CTkLabel(main_scroll, text="No records found for this period.", font=("Arial", 14)).pack(pady=20)
+            ctk.CTkLabel(main_scroll, text="No reservations active during this period.", font=("Arial", 14), text_color="gray").pack(pady=20)
         else:
             for r in res_data:
                 row = ctk.CTkFrame(main_scroll, height=35, fg_color=("gray85", "gray25"))
                 row.pack(fill="x", padx=10, pady=2)
                 
+                # Format date to exclude seconds
+                c_in = r['check_in_display'].split('.')[0] if r['check_in_display'] else ""
+                
                 vals = [
                     f"#{r['reservation_id']}", 
                     r['full_name'], 
                     r['status'], 
-                    r['check_in_date'].split('T')[0], 
+                    c_in, 
                     f"₱{r['final_amount'] or 0:,.2f}", 
                     f"₱{r['amount_paid'] or 0:,.2f}"
                 ]
