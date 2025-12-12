@@ -55,7 +55,7 @@ date range financial summaries
 
 ### 1. Clone the Repository
 
-    git clone https://github.com/your-username/resort-service-desk.git
+    git clone https://github.com/synxx-ctrl/resort-service-desk.git
     cd resort-service-desk
 
 ### 2. Install Dependencies

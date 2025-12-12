@@ -11,7 +11,6 @@ class AdminDashboard:
         self.app.resizable(True, True)
         
         # --- FIX: Completely destroy the old container to remove the "Empty Space" ---
-        # If we just 'clear' it, the empty frame stays packed and takes up space.
         if hasattr(self.app, 'container') and self.app.container is not None:
             self.app.container.destroy()
 
