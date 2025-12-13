@@ -23,6 +23,7 @@ class CustomerModel:
     
     @staticmethod
     def calculate_and_create_bill(reservation_id):
+        # 1. Get Stay Duration
         res = query("SELECT check_in_date, check_out_date FROM reservation WHERE reservation_id=?", (reservation_id,), fetchone=True)
         nights = 1
         if res:
@@ -34,9 +35,11 @@ class CustomerModel:
                 nights = delta if delta > 0 else 1
             except: nights = 1
 
+        # 2. Get Services Total
         service_total_row = query("SELECT SUM(service_price * quantity) as total FROM reservation_services WHERE reservation_id=?", (reservation_id,), fetchone=True)
-        base_total = service_total_row['total'] if service_total_row and service_total_row['total'] is not None else 0.0
-        service_total = base_total * nights
+        # Note: In new logic, some services like 'Room Fee' might need 'nights' multiplier, but packages usually don't.
+        # For simplicity in this update, we assume the price stored in reservation_services is the FINAL calculated line item price.
+        service_total = service_total_row['total'] if service_total_row and service_total_row['total'] is not None else 0.0
         
         billing = query("SELECT * FROM billing WHERE reservation_id = ?", (reservation_id,), fetchone=True)
 
@@ -54,10 +57,7 @@ class CustomerModel:
             execute("UPDATE billing SET service_charges=?, final_amount=?, status=? WHERE billing_id=?", 
                     (service_total, final_amount, status, billing['billing_id']))
             return billing['billing_id']
-        else:
-            execute("INSERT INTO billing (reservation_id, final_amount, service_charges, amount_paid, status, cashier_name, created_at) VALUES (?, ?, ?, 0.0, 'Unpaid', 'Admin Cashier', datetime('now'))", 
-                          (reservation_id, service_total, service_total))
-            return None
+        return None
 
     @staticmethod
     def record_payment(reservation_id, customer_id, amount, method):
@@ -74,15 +74,6 @@ class CustomerModel:
     def checkout_reservation(reservation_id):
         execute("UPDATE reservation SET status='Checked-out', check_out_date_actual=datetime('now') WHERE reservation_id=?", (reservation_id,))
 
-    @staticmethod
-    def get_customer_summary(customer_id):
-        services_data = query("""SELECT r.reservation_id, r.check_in_date, r.check_out_date, r.status, s.service_name, rs.quantity, rs.service_price
-            FROM reservation r LEFT JOIN reservation_services rs ON r.reservation_id = rs.reservation_id
-            LEFT JOIN service s ON rs.service_id = s.service_id WHERE r.customer_id = ? ORDER BY r.check_in_date DESC""", (customer_id,), fetchall=True)
-        payments_data = query("""SELECT p.payment_date, p.amount, p.payment_method, b.reservation_id, b.final_amount, b.amount_paid
-            FROM payment p JOIN billing b ON p.billing_id = b.billing_id WHERE p.customer_id = ? ORDER BY p.payment_date DESC""", (customer_id,), fetchall=True)
-        return {'services_history': services_data, 'payments_history': payments_data}
-
 class RoomModel:
     @staticmethod
     def get_room_capacity(room_id):
@@ -90,19 +81,7 @@ class RoomModel:
         return row['room_capacity'] if row else 0
 
     @staticmethod
-    def get_available_rooms(check_in, check_out):
-        # Keep existing method for backward compatibility if needed, or simplified lookups
-        return query("""SELECT * FROM room r WHERE r.status != 'maintenance' AND r.room_id NOT IN (
-                SELECT reservation.room_id FROM reservation WHERE reservation.room_id IS NOT NULL AND reservation.is_cancelled = 0 
-                AND reservation.status NOT IN ('Checked-out', 'Cancelled') AND (
-                    (? < check_out_date AND ? >= check_in_date) OR (? <= check_out_date AND ? > check_in_date) OR (? >= check_in_date AND ? <= check_out_date)
-                ))""", (check_out, check_in, check_out, check_in, check_in, check_out), fetchall=True)
-
-    # --- NEW METHOD: Get ALL rooms with computed status ---
-    @staticmethod
     def get_all_rooms_status(check_in, check_out, room_type):
-        # Status Priority: Maintenance/Cleaning > Occupied (Overlap) > Available
-        # Overlap Logic: (ReqStart < ResEnd) AND (ReqEnd > ResStart)
         return query("""
             SELECT r.*,
                 CASE
@@ -133,17 +112,14 @@ class MaintenanceModel:
     def report_issue(room_id, service_id, reservation_id, customer_id, issue, action):
         execute("""INSERT INTO maintenance_logs (room_id, service_id, reservation_id, reported_by_customer_id, issue_description, action_taken, status, date_reported) 
                    VALUES (?, ?, ?, ?, ?, ?, 'Pending', datetime('now'))""", (room_id, service_id, reservation_id, customer_id, issue, action))
-        
-        if room_id: 
-            RoomModel.set_room_status(room_id, 'maintenance')
+        if room_id: RoomModel.set_room_status(room_id, 'maintenance')
 
     @staticmethod
     def resolve_issue(log_id):
-        row = query("SELECT room_id, service_id FROM maintenance_logs WHERE log_id=?", (log_id,), fetchone=True)
+        row = query("SELECT room_id FROM maintenance_logs WHERE log_id=?", (log_id,), fetchone=True)
         if row:
             execute("UPDATE maintenance_logs SET status='Resolved', date_resolved=datetime('now') WHERE log_id=?", (log_id,))
-            if row['room_id']: 
-                RoomModel.set_room_status(row['room_id'], 'available')
+            if row['room_id']: RoomModel.set_room_status(row['room_id'], 'available')
 
 class AmenityModel:
     @staticmethod
@@ -154,24 +130,22 @@ class AmenityModel:
             JOIN reservation r ON rs.reservation_id = r.reservation_id
             WHERE rs.service_id = ? AND (r.status = 'Checked-in' OR r.status = 'Pending')
         """, (service_id,), fetchone=True)
-        used = active_usage['used_count'] if active_usage and active_usage['used_count'] else 0
-        
-        broken_unreserved_query = query("""
-            SELECT COUNT(*) as broken_count
-            FROM maintenance_logs
-            WHERE service_id = ? AND status = 'Pending' AND reservation_id IS NULL
-        """, (service_id,), fetchone=True)
-        
-        broken_unreserved = broken_unreserved_query['broken_count'] if broken_unreserved_query and broken_unreserved_query['broken_count'] else 0
-        
-        available = stock_total - used - broken_unreserved
-        return max(0, available)
+        used = active_usage['used_count'] or 0
+        broken = query("SELECT COUNT(*) as b FROM maintenance_logs WHERE service_id = ? AND status = 'Pending' AND reservation_id IS NULL", (service_id,), fetchone=True)['b']
+        return max(0, stock_total - used - broken)
 
 class ResortModel:
     @staticmethod
     def get_max_capacity():
         row = query("SELECT max_capacity FROM resort_info LIMIT 1", fetchone=True)
         return row['max_capacity'] if row else 100
+
+    @staticmethod
+    def get_entrance_fees():
+        """Returns the fee structure for calculations"""
+        row = query("SELECT fee_adult, fee_teen, fee_kid FROM resort_info LIMIT 1", fetchone=True)
+        if row: return row
+        return {'fee_adult': 150.0, 'fee_teen': 100.0, 'fee_kid': 0.0}
 
     @staticmethod
     def check_capacity_availability(check_in_str, check_out_str, new_guests):
